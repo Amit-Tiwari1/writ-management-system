@@ -1,0 +1,439 @@
+"use client";
+
+import React, { useState } from "react";
+import {
+  Card,
+  CardBody,
+  Button,
+  Input,
+  Select,
+  SelectItem,
+  Table,
+  TableHeader,
+  TableColumn,
+  TableBody,
+  TableRow,
+  TableCell,
+  Chip,
+  Slider,
+  Modal,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  useDisclosure,
+} from "@nextui-org/react";
+import Link from "next/link";
+
+export default function AliasesMasterPage() {
+  const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
+  const { isOpen: isAdvocateOpen, onOpen: onAdvocateOpen, onOpenChange: onAdvocateOpenChange } = useDisclosure();
+  const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
+
+  const [threshold, setThreshold] = useState<number>(85);
+
+  const [aliasList, setAliasList] = useState([
+    { id: 1, keyword: "UPPRPB", language: "English (Abbr)", category: "Primary Institution Code", matchWeight: "Exact (100%)" },
+    { id: 2, keyword: "Bharti Board", language: "English (Colloquial)", category: "Informal Court Name", matchWeight: "High (90%)" },
+    { id: 3, keyword: "उत्तर प्रदेश पुलिस भर्ती एवं प्रोन्नति बोर्ड", language: "Hindi (Devanagari)", category: "Full Official Name", matchWeight: "Exact (100%)" },
+    { id: 4, keyword: "Police Recruitment Board", language: "English (General)", category: "Alternative Entity", matchWeight: "Medium (80%)" },
+    { id: 5, keyword: "Chairman Police Bharti Board", language: "English (Post)", category: "Representative Title", matchWeight: "High (90%)" },
+    { id: 6, keyword: "UP Police Recruitment & Promotion", language: "English", category: "Standard Title", matchWeight: "High (95%)" },
+  ]);
+
+  const [standingCounsels, setStandingCounsels] = useState([
+    { id: 1, name: "Chief Standing Counsel (High Court Allahabad)", monitoredBenches: "Bench 1, Bench 12, Bench 34", autoFlag: true },
+    { id: 2, name: "Chief Standing Counsel (High Court Lucknow)", monitoredBenches: "Court No. 1, Court No. 18", autoFlag: true },
+    { id: 3, name: "M.C. Chaturvedi (Senior Additional Advocate General)", monitoredBenches: "Division Benches", autoFlag: true },
+  ]);
+
+  const [formData, setFormData] = useState({
+    keyword: "",
+    language: "Hindi (Devanagari)",
+    category: "Informal Court Name",
+    matchWeight: "High (90%)",
+  });
+
+  const [advocateData, setAdvocateData] = useState({
+    name: "",
+    monitoredBenches: "",
+  });
+
+  const [itemToDelete, setItemToDelete] = useState<any>(null);
+
+  const handleAddKeyword = () => {
+    if (!formData.keyword.trim()) return;
+    setAliasList((prev) => [
+      ...prev,
+      {
+        id: prev.length + 1,
+        keyword: formData.keyword.trim(),
+        language: formData.language,
+        category: formData.category,
+        matchWeight: formData.matchWeight,
+      },
+    ]);
+    setFormData({
+      keyword: "",
+      language: "Hindi (Devanagari)",
+      category: "Informal Court Name",
+      matchWeight: "High (90%)",
+    });
+    onAddOpenChange();
+  };
+
+  const handleAddAdvocate = () => {
+    if (!advocateData.name.trim()) return;
+    setStandingCounsels((prev) => [
+      ...prev,
+      {
+        id: prev.length + 1,
+        name: advocateData.name.trim(),
+        monitoredBenches: advocateData.monitoredBenches.trim() || "All High Court Benches",
+        autoFlag: true,
+      },
+    ]);
+    setAdvocateData({ name: "", monitoredBenches: "" });
+    onAdvocateOpenChange();
+  };
+
+  const handleOpenDelete = (item: any, type: "KEYWORD" | "ADVOCATE") => {
+    setItemToDelete({ ...item, type });
+    onDeleteOpen();
+  };
+
+  const handleConfirmDelete = () => {
+    if (!itemToDelete) return;
+    if (itemToDelete.type === "KEYWORD") {
+      setAliasList((prev) => prev.filter((a) => a.id !== itemToDelete.id));
+    } else {
+      setStandingCounsels((prev) => prev.filter((c) => c.id !== itemToDelete.id));
+    }
+    onDeleteOpenChange();
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* 1. Header Information Bar */}
+      <Card shadow="none" className="border border-slate-200/80 bg-white">
+        <CardBody className="p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Link href="/admin/cases">
+                  <Button isIconOnly size="sm" variant="light" className="text-slate-500">
+                    <span className="material-symbols-rounded">arrow_back</span>
+                  </Button>
+                </Link>
+                <h1 className="text-base font-bold text-slate-900">6.10 Institutional Alias & Keyword Matrix</h1>
+                <Chip size="sm" className="bg-amber-500/20 px-1 text-[10px] font-bold text-amber-700">
+                  Cause List Matching Engine
+                </Chip>
+              </div>
+              <p className="text-xs text-slate-500 ml-9">
+                Manages acronyms, Hindi variations & advocate associations to power Screen 2.4 Inward Discovery Desk[cite: 19]
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="bordered"
+                radius="sm"
+                className="border-slate-200 bg-white text-xs font-semibold text-slate-700"
+                startContent={<span className="material-symbols-rounded text-sm">person_add</span>}
+                onPress={onAdvocateOpen}
+              >
+                Add Panel Advocate
+              </Button>
+              <Button
+                size="sm"
+                radius="sm"
+                className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
+                startContent={<span className="material-symbols-rounded text-sm">add</span>}
+                onPress={onAddOpen}
+              >
+                Add Alias Variant
+              </Button>
+            </div>
+          </div>
+
+          {/* Fuzzy Threshold Slider */}
+          <div className="mt-4 grid grid-cols-1 gap-4 border-t border-slate-100 pt-3 md:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 md:col-span-2">
+              <div className="flex justify-between text-xs">
+                <span className="font-bold text-slate-800">Fuzzy Matching Sensitivity Threshold</span>
+                <span className="font-bold text-blue-700">{threshold}%</span>
+              </div>
+              <Slider
+                size="sm"
+                step={5}
+                minValue={60}
+                maxValue={100}
+                value={threshold}
+                onChange={(val) => setThreshold(val as number)}
+                className="mt-2"
+              />
+              <p className="mt-1 text-[10px] text-slate-400">
+                Matches with confidence above this percentage automatically surface in 2.4 Inward Discovery Desk.[cite: 19]
+              </p>
+            </div>
+
+            <div className="flex flex-col justify-between rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-900">
+              <span className="font-bold">Active Engine Status:</span>
+              <p className="text-[11px] mt-1">
+                Scanning daily cause lists for <b>{aliasList.length} synonyms</b> across Allahabad & Lucknow registries.[cite: 19]
+              </p>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+
+      {/* 2. Split Grids: Left (Aliases) + Right (Monitored Advocates) */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        {/* Keywords Table (7 Cols) */}
+        <Card shadow="none" className="border border-slate-200/80 bg-white lg:col-span-7">
+          <div className="border-b border-slate-100 p-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Configured Keyword Synonyms ({aliasList.length})
+            </h3>
+          </div>
+          <CardBody className="p-0">
+            <Table removeWrapper aria-label="Alias Matrix Table" className="min-w-full">
+              <TableHeader>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">KEYWORD PATTERN</TableColumn>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">SCRIPT / LANGUAGE</TableColumn>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">MATCH WEIGHT</TableColumn>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
+              </TableHeader>
+              <TableBody items={aliasList}>
+                {(item) => (
+                  <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell>
+                      <p className="font-bold text-xs text-slate-900">{item.keyword}</p>
+                      <p className="text-[10px] text-slate-400">{item.category}</p>
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-600">{item.language}</TableCell>
+                    <TableCell>
+                      <Chip size="sm" variant="flat" color="primary" className="text-[10px] font-mono font-bold">
+                        {item.matchWeight}
+                      </Chip>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Button
+                        isIconOnly
+                        size="sm"
+                        variant="light"
+                        className="text-slate-400 hover:text-rose-600"
+                        onClick={() => handleOpenDelete(item, "KEYWORD")}
+                      >
+                        <span className="material-symbols-rounded text-sm">delete</span>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardBody>
+        </Card>
+
+        {/* Monitored Standing Counsels Table (5 Cols) */}
+        <Card shadow="none" className="border border-slate-200/80 bg-white lg:col-span-5">
+          <div className="border-b border-slate-100 p-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Monitored Panel Advocates ({standingCounsels.length})
+            </h3>
+            <p className="text-[11px] text-slate-400">Any appearance listed for these counsels auto-tags the board[cite: 19]</p>
+          </div>
+          <CardBody className="p-0">
+            <Table removeWrapper aria-label="Standing Counsels Table" className="min-w-full">
+              <TableHeader>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">ADVOCATE NAME / OFFICE</TableColumn>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">MONITORED BENCHES</TableColumn>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
+              </TableHeader>
+              <TableBody items={standingCounsels}>
+                {(item) => (
+                  <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell>
+                      <p className="text-xs font-bold text-slate-900">{item.name}</p>
+                      <Chip size="sm" color="success" variant="flat" className="text-[9px] font-bold h-4 px-1 mt-0.5">
+                        Active Listener
+                      </Chip>
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-600">{item.monitoredBenches}</TableCell>
+                    <TableCell className="text-center">
+                      <Button
+                        isIconOnly
+                        size="sm"
+                        variant="light"
+                        className="text-slate-400 hover:text-rose-600"
+                        onClick={() => handleOpenDelete(item, "ADVOCATE")}
+                      >
+                        <span className="material-symbols-rounded text-sm">delete</span>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardBody>
+        </Card>
+      </div>
+
+      {/* MODAL 1: Add Alias Variant */}
+      <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <span className="material-symbols-rounded text-blue-700">spellcheck</span>
+                Add Institution Alias Variant
+              </ModalHeader>
+              <ModalBody className="space-y-3">
+                <Input
+                  size="sm"
+                  label="Keyword / Search Pattern"
+                  labelPlacement="outside"
+                  placeholder="e.g. उत्तर प्रदेश पुलिस बोर्ड"
+                  value={formData.keyword}
+                  onValueChange={(v) => setFormData({ ...formData, keyword: v })}
+                  isRequired
+                />
+                <Select
+                  size="sm"
+                  label="Script / Language Classification"
+                  labelPlacement="outside"
+                  selectedKeys={[formData.language]}
+                  onChange={(e) => setFormData({ ...formData, language: e.target.value })}
+                  isRequired
+                >
+                  <SelectItem key="Hindi (Devanagari)">Hindi (Devanagari Script)</SelectItem>
+                  <SelectItem key="English (Latin)">English (Latin Script)</SelectItem>
+                  <SelectItem key="English (Abbr)">English (Acronym / Abbreviation)</SelectItem>
+                  <SelectItem key="English (Colloquial)">English (Colloquial / Slang)</SelectItem>
+                </Select>
+                <Select
+                  size="sm"
+                  label="Entity Category"
+                  labelPlacement="outside"
+                  selectedKeys={[formData.category]}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  isRequired
+                >
+                  <SelectItem key="Primary Institution Code">Primary Institution Code</SelectItem>
+                  <SelectItem key="Informal Court Name">Informal Court Name</SelectItem>
+                  <SelectItem key="Full Official Name">Full Official Name</SelectItem>
+                  <SelectItem key="Representative Title">Representative Title</SelectItem>
+                  <SelectItem key="Alternative Entity">Alternative Entity</SelectItem>
+                </Select>
+                <Select
+                  size="sm"
+                  label="Match Weight Level"
+                  labelPlacement="outside"
+                  selectedKeys={[formData.matchWeight]}
+                  onChange={(e) => setFormData({ ...formData, matchWeight: e.target.value })}
+                  isRequired
+                >
+                  <SelectItem key="Exact (100%)">Exact (100% Match)</SelectItem>
+                  <SelectItem key="High (95%)">High (95% Match)</SelectItem>
+                  <SelectItem key="High (90%)">High (90% Match)</SelectItem>
+                  <SelectItem key="Medium (80%)">Medium (80% Match)</SelectItem>
+                </Select>
+              </ModalBody>
+              <ModalFooter>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  radius="sm"
+                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  onClick={handleAddKeyword}
+                >
+                  Save Alias
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* MODAL 2: Add Panel Advocate */}
+      <Modal isOpen={isAdvocateOpen} onOpenChange={onAdvocateOpenChange} placement="top">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <span className="material-symbols-rounded text-blue-700">person_add</span>
+                Add Monitored Standing Counsel
+              </ModalHeader>
+              <ModalBody className="space-y-3">
+                <Input
+                  size="sm"
+                  label="Advocate / Office Name"
+                  labelPlacement="outside"
+                  placeholder="e.g. Additional Chief Standing Counsel (LKO)"
+                  value={advocateData.name}
+                  onValueChange={(v) => setAdvocateData({ ...advocateData, name: v })}
+                  isRequired
+                />
+                <Input
+                  size="sm"
+                  label="Monitored Benches / Court Halls"
+                  labelPlacement="outside"
+                  placeholder="e.g. Court No. 1, Court No. 18, Division Bench"
+                  value={advocateData.monitoredBenches}
+                  onValueChange={(v) => setAdvocateData({ ...advocateData, monitoredBenches: v })}
+                  isRequired
+                />
+              </ModalBody>
+              <ModalFooter>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  radius="sm"
+                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  onClick={handleAddAdvocate}
+                >
+                  Save Panel Advocate
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* MODAL 3: Delete Confirmation */}
+      <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <span className="material-symbols-rounded text-rose-600">warning</span>
+                Confirm Deletion
+              </ModalHeader>
+              <ModalBody className="text-xs text-slate-600">
+                Are you sure you want to remove <b>{itemToDelete?.keyword || itemToDelete?.name}</b>? The automatic discovery scraper will stop querying this pattern from High Court cause lists.[cite: 19]
+              </ModalBody>
+              <ModalFooter>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  radius="sm"
+                  className="bg-rose-600 font-semibold text-white hover:bg-rose-700"
+                  onClick={handleConfirmDelete}
+                >
+                  Delete Entry
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+    </div>
+  );
+}
