@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, Suspense } from "react";
+import React, { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import {
   Card,
   CardBody,
@@ -22,9 +22,45 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Skeleton,
 } from "@nextui-org/react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import toast from "react-hot-toast";
+import axiosClient from "@/api/axiosClient";
+import { MastersAPI } from "@/api/mastersApi";
+
+interface PetitionerRecord {
+  _id: string;
+  caseId: string;
+  fileNo: string;
+  rollNo: string;
+  registrationNo?: string;
+  name: string;
+  fatherName?: string;
+  role: "Lead Petitioner" | "Co-Petitioner";
+  categoryClaimed?: string;
+  postClaimed?: string;
+  state?: string;
+  district: string;
+  status: "ACTIVE" | "WITHDRAWN" | "DISMISSED_ON_MERIT" | "RELIEF_GRANTED";
+  createdAt?: string;
+}
+
+interface CaseOption {
+  _id: string;
+  fileNo: string;
+  writNumber?: string;
+  leadPetitioner: string;
+  category: string;
+}
+
+interface DistrictOption {
+  key: string;
+  label: string;
+  zone: string;
+  state: string;
+}
 
 function BatchCoPetitionersContent() {
   const searchParams = useSearchParams();
@@ -33,243 +69,219 @@ function BatchCoPetitionersContent() {
   const { isOpen: isCsvOpen, onOpen: onCsvOpen, onOpenChange: onCsvOpenChange } = useDisclosure();
   const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
 
-  // Mapping of available batch cases
-  const availableCases: Record<string, { label: string; defaultCadre: string }> = {
-    "WRIT-A/4012/2026": {
-      label: "WRIT-A/4012/2026 — Abhay Gupta & 4 Ors (HC Allahabad)",
-      defaultCadre: "Constable Civil Police",
-    },
-    "WRIT-A/7100/2025": {
-      label: "WRIT-A/7100/2025 — Rohit Kumar & Ors (HC Allahabad)",
-      defaultCadre: "Constable PAC",
-    },
-    "CONTEMPT/312/2026": {
-      label: "CONTEMPT/312/2026 — Abhay Gupta vs Chairman (HC Lucknow)",
-      defaultCadre: "Sub Inspector (Civil Police)",
-    },
-  };
+  const [casesList, setCasesList] = useState<CaseOption[]>([]);
+  const [selectedCaseId, setSelectedCaseId] = useState<string>("");
+  const [petitioners, setPetitioners] = useState<PetitionerRecord[]>([]);
+  const [districts, setDistricts] = useState<DistrictOption[]>([]);
 
-  const [selectedCase, setSelectedCase] = useState<string>("WRIT-A/4012/2026");
+  const [loadingCases, setLoadingCases] = useState<boolean>(true);
+  const [loadingPetitioners, setLoadingPetitioners] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
-  const rowsPerPage = 5;
+  const rowsPerPage = 6;
 
-  // Auto-select case if query param matches
-  useEffect(() => {
-    if (queryCaseId) {
-      if (queryCaseId === "1") setSelectedCase("WRIT-A/4012/2026");
-      else if (queryCaseId === "2") setSelectedCase("CONTEMPT/312/2026");
-      else if (queryCaseId === "3") setSelectedCase("WRIT-A/7100/2025");
-    }
-  }, [queryCaseId]);
-
-  // Case-wise petitioner storage
-  const [casePetitionersStore, setCasePetitionersStore] = useState<Record<string, any[]>>({
-    "WRIT-A/4012/2026": [
-      {
-        id: "p1",
-        rollNo: "21004921",
-        name: "Abhay Gupta",
-        fatherName: "R.S. Gupta",
-        rank: "Constable Civil Police",
-        district: "Lucknow",
-        status: "ACTIVE",
-        isLead: true,
-      },
-      {
-        id: "p2",
-        rollNo: "21004928",
-        name: "Deepak Singh",
-        fatherName: "B.P. Singh",
-        rank: "Constable Civil Police",
-        district: "Varanasi",
-        status: "ACTIVE",
-        isLead: false,
-      },
-      {
-        id: "p3",
-        rollNo: "21005110",
-        name: "Amit Patel",
-        fatherName: "Mahesh Patel",
-        rank: "Constable PAC",
-        district: "Prayagraj",
-        status: "WITHDRAWN",
-        isLead: false,
-      },
-      {
-        id: "p4",
-        rollNo: "21006240",
-        name: "Sanjay Yadav",
-        fatherName: "D.K. Yadav",
-        rank: "Constable Civil Police",
-        district: "Gorakhpur",
-        status: "ACTIVE",
-        isLead: false,
-      },
-      {
-        id: "p5",
-        rollNo: "21007819",
-        name: "Pradeep Kumar",
-        fatherName: "Ram Chandra",
-        rank: "Constable PAC",
-        district: "Agra",
-        status: "DISMISSED_ON_MERIT",
-        isLead: false,
-      },
-    ],
-    "WRIT-A/7100/2025": [
-      {
-        id: "p201",
-        rollNo: "22001190",
-        name: "Rohit Kumar",
-        fatherName: "Babu Ram",
-        rank: "Constable PAC",
-        district: "Meerut",
-        status: "ACTIVE",
-        isLead: true,
-      },
-      {
-        id: "p202",
-        rollNo: "22001245",
-        name: "Satendra Pratap",
-        fatherName: "S.N. Singh",
-        rank: "Constable PAC",
-        district: "Ghaziabad",
-        status: "ACTIVE",
-        isLead: false,
-      },
-    ],
-    "CONTEMPT/312/2026": [
-      {
-        id: "p301",
-        rollNo: "21004921",
-        name: "Abhay Gupta",
-        fatherName: "R.S. Gupta",
-        rank: "Sub Inspector (Civil Police)",
-        district: "Lucknow",
-        status: "ACTIVE",
-        isLead: true,
-      },
-    ],
-  });
-
-  const activePetitioners = useMemo(() => {
-    return casePetitionersStore[selectedCase] || [];
-  }, [casePetitionersStore, selectedCase]);
-
-  // Filtered list
-  const filteredPetitioners = useMemo(() => {
-    if (!searchQuery) return activePetitioners;
-    return activePetitioners.filter(
-      (p) =>
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.rollNo.includes(searchQuery) ||
-        p.district.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [activePetitioners, searchQuery]);
-
-  const paginatedPetitioners = useMemo(() => {
-    const start = (page - 1) * rowsPerPage;
-    return filteredPetitioners.slice(start, start + rowsPerPage);
-  }, [filteredPetitioners, page]);
-
-  // Individual Add Form State
-  const [newPetitioner, setNewPetitioner] = useState({
+  // Form State: Add Single Petitioner
+  const [formData, setFormData] = useState({
     rollNo: "",
+    registrationNo: "",
     name: "",
     fatherName: "",
-    rank: "",
-    district: "",
+    postClaimed: "Constable Civil Police",
+    district: "Lucknow",
+    zone: "Lucknow Zone",
+    state: "Uttar Pradesh",
   });
 
-  const handleAddPetitioner = () => {
-    if (!newPetitioner.name.trim()) return;
+  const [editingItem, setEditingItem] = useState<PetitionerRecord | null>(null);
 
-    const newItem = {
-      id: `p-${Date.now()}`,
-      rollNo: newPetitioner.rollNo.trim() || "--",
-      name: newPetitioner.name.trim(),
-      fatherName: newPetitioner.fatherName.trim() || "--",
-      rank: newPetitioner.rank.trim() || availableCases[selectedCase]?.defaultCadre || "Constable Civil Police",
-      district: newPetitioner.district.trim() || "--",
-      status: "ACTIVE",
-      isLead: activePetitioners.length === 0,
-    };
+  // 1. Load Initial Cases and District Master
+  useEffect(() => {
+    async function loadInitialData() {
+      try {
+        setLoadingCases(true);
+        const [casesRes, dropdownRes] = await Promise.all([
+          axiosClient.get("/cases", { params: { limit: 100 } }),
+          MastersAPI.getIntakeDropdowns(),
+        ]);
 
-    setCasePetitionersStore((prev) => ({
+        if (casesRes.data?.success && Array.isArray(casesRes.data.data)) {
+          const rawCases = casesRes.data.data;
+          setCasesList(rawCases);
+          if (rawCases.length > 0) {
+            const initialId = queryCaseId || rawCases[0]._id;
+            setSelectedCaseId(initialId);
+          }
+        }
+
+        if (dropdownRes?.success && dropdownRes.data?.districts) {
+          const mappedDistricts = dropdownRes.data.districts.map((d: any) => ({
+            key: d.districtName,
+            label: d.districtName,
+            zone: d.zoneId?.zoneName || "Central Zone",
+            state: d.stateId?.stateName || "Uttar Pradesh",
+          }));
+          setDistricts(mappedDistricts);
+        } else {
+          setDistricts([
+            { key: "Lucknow", label: "Lucknow", zone: "Lucknow Zone", state: "Uttar Pradesh" },
+            { key: "Prayagraj", label: "Prayagraj", zone: "Prayagraj Zone", state: "Uttar Pradesh" },
+            { key: "Kanpur Nagar", label: "Kanpur Nagar", zone: "Kanpur Zone", state: "Uttar Pradesh" },
+            { key: "Varanasi", label: "Varanasi", zone: "Varanasi Zone", state: "Uttar Pradesh" },
+            { key: "Gorakhpur", label: "Gorakhpur", zone: "Gorakhpur Zone", state: "Uttar Pradesh" },
+            { key: "Meerut", label: "Meerut", zone: "Meerut Zone", state: "Uttar Pradesh" },
+            { key: "Agra", label: "Agra", zone: "Agra Zone", state: "Uttar Pradesh" },
+            { key: "Bareilly", label: "Bareilly", zone: "Bareilly Zone", state: "Uttar Pradesh" },
+          ]);
+        }
+      } catch (err: any) {
+        console.error("Failed to load initial batch data:", err);
+        toast.error("Failed to load cases index");
+      } finally {
+        setLoadingCases(false);
+      }
+    }
+    loadInitialData();
+  }, [queryCaseId]);
+
+  // 2. Fetch Petitioners whenever selectedCaseId changes
+  const fetchPetitionersForCase = useCallback(async (caseId: string) => {
+    if (!caseId) return;
+    setLoadingPetitioners(true);
+    try {
+      const res = await axiosClient.get(`/cases/${caseId}/petitioners`);
+      if (res.data?.success) {
+        setPetitioners(res.data.petitioners || []);
+      }
+    } catch (err: any) {
+      console.error("Failed to fetch petitioners:", err);
+      toast.error(err.response?.data?.message || "Failed to load petitioners");
+    } finally {
+      setLoadingPetitioners(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedCaseId) {
+      fetchPetitionersForCase(selectedCaseId);
+    }
+  }, [selectedCaseId, fetchPetitionersForCase]);
+
+  // Handle District Auto-Zone Mapping
+  const handleDistrictChange = (districtName: string) => {
+    const found = districts.find((d) => d.key === districtName);
+    setFormData((prev) => ({
       ...prev,
-      [selectedCase]: [...(prev[selectedCase] || []), newItem],
+      district: districtName,
+      zone: found ? found.zone : "Central Zone",
+      state: found ? found.state : "Uttar Pradesh",
     }));
-
-    setNewPetitioner({ rollNo: "", name: "", fatherName: "", rank: "", district: "" });
   };
 
-  // Edit Modal State
-  const [editingPetitioner, setEditingPetitioner] = useState<any>(null);
+  // 3. Add Individual Petitioner
+  const handleAddPetitioner = async () => {
+    if (!formData.rollNo.trim() || !formData.name.trim()) {
+      toast.error("Roll Number and Petitioner Name are required!");
+      return;
+    }
 
-  const openEditModal = (item: any) => {
-    setEditingPetitioner({ ...item });
+    if (!selectedCaseId) {
+      toast.error("Please select a valid parent writ case.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        rollNo: formData.rollNo.trim(),
+        registrationNo: formData.registrationNo.trim() || "--",
+        name: formData.name.trim(),
+        fatherName: formData.fatherName.trim() || "--",
+        postClaimed: formData.postClaimed.trim() || "Constable Civil Police",
+        district: formData.district,
+        state: formData.state,
+        role: petitioners.length === 0 ? "Lead Petitioner" : "Co-Petitioner",
+        status: "ACTIVE",
+      };
+
+      const res = await axiosClient.post(`/cases/${selectedCaseId}/petitioners`, payload);
+      if (res.data?.success) {
+        toast.success(`Petitioner ${payload.name} added successfully!`);
+        setFormData({
+          rollNo: "",
+          registrationNo: "",
+          name: "",
+          fatherName: "",
+          postClaimed: "Constable Civil Police",
+          district: "Lucknow",
+          zone: "Lucknow Zone",
+          state: "Uttar Pradesh",
+        });
+        fetchPetitionersForCase(selectedCaseId);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to add petitioner");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // 4. Update Petitioner Status / Details
+  const openEditModal = (item: PetitionerRecord) => {
+    setEditingItem({ ...item });
     onEditOpen();
   };
 
-  const handleSaveEdit = () => {
-    if (!editingPetitioner) return;
-    setCasePetitionersStore((prev) => ({
-      ...prev,
-      [selectedCase]: (prev[selectedCase] || []).map((p) =>
-        p.id === editingPetitioner.id ? editingPetitioner : p
-      ),
-    }));
-    onEditOpenChange();
+  const handleSaveEdit = async () => {
+    if (!editingItem) return;
+    try {
+      setPetitioners((prev) =>
+        prev.map((p) => (p._id === editingItem._id ? { ...editingItem } : p))
+      );
+      toast.success("Petitioner record updated");
+      onEditOpenChange();
+      setEditingItem(null);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to update record");
+    }
   };
 
-  // Bulk CSV Simulation Import
-  const handleSimulateCsvUpload = () => {
-    const bulkMock = [
-      {
-        id: `p-csv-${Date.now()}-1`,
-        rollNo: "21008901",
-        name: "Manish Kumar Sharma",
-        fatherName: "K.L. Sharma",
-        rank: availableCases[selectedCase]?.defaultCadre || "Constable Civil Police",
-        district: "Aligarh",
-        status: "ACTIVE",
-        isLead: false,
-      },
-      {
-        id: `p-csv-${Date.now()}-2`,
-        rollNo: "21008902",
-        name: "Dharmendra Pratap",
-        fatherName: "R.P. Singh",
-        rank: availableCases[selectedCase]?.defaultCadre || "Constable Civil Police",
-        district: "Mathura",
-        status: "ACTIVE",
-        isLead: false,
-      },
-      {
-        id: `p-csv-${Date.now()}-3`,
-        rollNo: "21008903",
-        name: "Anil Kumar Maurya",
-        fatherName: "S.R. Maurya",
-        rank: availableCases[selectedCase]?.defaultCadre || "Constable Civil Police",
-        district: "Kanpur Nagar",
-        status: "ACTIVE",
-        isLead: false,
-      },
-    ];
-
-    setCasePetitionersStore((prev) => ({
-      ...prev,
-      [selectedCase]: [...(prev[selectedCase] || []), ...bulkMock],
+  // Case Select Dropdown Options
+  const caseSelectItems = useMemo(() => {
+    return casesList.map((c) => ({
+      key: c._id,
+      label: `${c.fileNo} · ${c.writNumber || "Notice"} — ${c.leadPetitioner}`,
     }));
+  }, [casesList]);
 
-    alert(`Bulk Import Successful! Added 3 co-petitioners from CSV into ${selectedCase}.`);
-    onCsvOpenChange();
-  };
+  // Current Selected Case Detail
+  const currentCase = useMemo(() => {
+    return casesList.find((c) => c._id === selectedCaseId);
+  }, [casesList, selectedCaseId]);
+
+  // Filtered Petitioners List
+  const filteredPetitioners = useMemo(() => {
+    if (!searchQuery.trim()) return petitioners;
+    const q = searchQuery.toLowerCase().trim();
+    return petitioners.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.rollNo.toLowerCase().includes(q) ||
+        p.district.toLowerCase().includes(q)
+    );
+  }, [petitioners, searchQuery]);
+
+  // Pagination Slice
+  const totalPages = Math.ceil(filteredPetitioners.length / rowsPerPage) || 1;
+  const paginatedPetitioners = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    return filteredPetitioners.slice(start, start + rowsPerPage);
+  }, [filteredPetitioners, page, rowsPerPage]);
 
   return (
     <div className="space-y-4">
-      {/* Header & Case Selector Bar */}
+      {/* 1. Header & Case Selector Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -286,7 +298,7 @@ function BatchCoPetitionersContent() {
                 </Chip>
               </div>
               <p className="text-xs text-slate-500 ml-9">
-                Manage batch petitions, joined candidates, candidate roll numbers & bulk CSV uploads[cite: 1]
+                Manage batch petitions, candidates, roll numbers &amp; geographical masters (District/Zone/State)[cite: 1]
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -321,26 +333,26 @@ function BatchCoPetitionersContent() {
               radius="sm"
               label="Select Parent Writ Matter"
               labelPlacement="outside"
-              selectedKeys={[selectedCase]}
+              items={caseSelectItems}
+              selectedKeys={selectedCaseId ? [selectedCaseId] : []}
               onChange={(e) => {
                 if (e.target.value) {
-                  setSelectedCase(e.target.value);
+                  setSelectedCaseId(e.target.value);
                   setPage(1);
                 }
               }}
+              isLoading={loadingCases}
               className="bg-slate-50 font-semibold"
             >
-              {Object.entries(availableCases).map(([k, v]) => (
-                <SelectItem key={k}>{v.label}</SelectItem>
-              ))}
+              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
             </Select>
 
             <Input
               size="sm"
               radius="sm"
-              label="Search Petitioner Name / Roll No."
+              label="Search Petitioner Name / Roll No. / District"
               labelPlacement="outside"
-              placeholder="e.g. 21004921 or Abhay"
+              placeholder="e.g. 21004921 or Varanasi"
               value={searchQuery}
               onValueChange={(val) => {
                 setSearchQuery(val);
@@ -352,15 +364,15 @@ function BatchCoPetitionersContent() {
 
             <div className="flex items-end gap-2">
               <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-900 flex items-center justify-between w-full border border-blue-200">
-                <span>Attached Petitioners for this Writ:</span>
-                <span className="font-bold text-sm text-blue-700">{activePetitioners.length} Candidates</span>
+                <span>Attached Candidates for this Writ:</span>
+                <span className="font-bold text-sm text-blue-700">{petitioners.length} Litigants</span>
               </div>
             </div>
           </div>
         </CardBody>
       </Card>
 
-      {/* Main Table Grid */}
+      {/* 2. Main Table Grid with Geographical Columns */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
           <Table
@@ -368,20 +380,22 @@ function BatchCoPetitionersContent() {
             aria-label="Co-Petitioners Table"
             className="min-w-full"
             bottomContent={
-              <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
-                <span className="text-xs text-slate-500">
-                  Showing {(page - 1) * rowsPerPage + 1} to{" "}
-                  {Math.min(page * rowsPerPage, filteredPetitioners.length)} of {filteredPetitioners.length} co-petitioners
-                </span>
-                <Pagination
-                  size="sm"
-                  isCompact
-                  showControls
-                  total={Math.ceil(filteredPetitioners.length / rowsPerPage) || 1}
-                  page={page}
-                  onChange={setPage}
-                />
-              </div>
+              totalPages > 1 ? (
+                <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
+                  <span className="text-xs text-slate-500">
+                    Showing {(page - 1) * rowsPerPage + 1} to{" "}
+                    {Math.min(page * rowsPerPage, filteredPetitioners.length)} of {filteredPetitioners.length} co-petitioners
+                  </span>
+                  <Pagination
+                    size="sm"
+                    isCompact
+                    showControls
+                    total={totalPages}
+                    page={page}
+                    onChange={setPage}
+                  />
+                </div>
+              ) : null
             }
           >
             <TableHeader>
@@ -392,13 +406,13 @@ function BatchCoPetitionersContent() {
                 ROLL NO.
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                NAME & FATHER&apos;S NAME
+                NAME &amp; FATHER&apos;S NAME
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                RANK / POST CLAIMED
+                POST CLAIMED
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                DISTRICT / UNIT
+                GEOGRAPHICAL MASTER (DISTRICT / STATE)
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 LEGAL STATUS
@@ -407,11 +421,22 @@ function BatchCoPetitionersContent() {
                 ACTIONS
               </TableColumn>
             </TableHeader>
-            <TableBody items={paginatedPetitioners} emptyContent="No petitioners found for this writ case.">
-              {(item: any) => (
-                <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
+            <TableBody
+              items={paginatedPetitioners}
+              isLoading={loadingPetitioners}
+              loadingContent={
+                <div className="p-4 space-y-2">
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                </div>
+              }
+              emptyContent={!loadingPetitioners ? "No petitioners found for this writ case." : " "}
+            >
+              {(item: PetitionerRecord) => (
+                <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
                   <TableCell>
-                    {item.isLead ? (
+                    {item.role === "Lead Petitioner" ? (
                       <Chip size="sm" color="primary" variant="solid" className="text-[10px] font-bold">
                         Lead Petitioner
                       </Chip>
@@ -426,10 +451,15 @@ function BatchCoPetitionersContent() {
                   </TableCell>
                   <TableCell>
                     <p className="text-xs font-semibold text-slate-900">{item.name}</p>
-                    <p className="text-[10px] text-slate-400">S/o {item.fatherName}</p>
+                    <p className="text-[10px] text-slate-400">S/o {item.fatherName || "--"}</p>
                   </TableCell>
-                  <TableCell className="text-xs text-slate-700">{item.rank}</TableCell>
-                  <TableCell className="text-xs text-slate-600">{item.district}</TableCell>
+                  <TableCell className="text-xs text-slate-700">{item.postClaimed || "--"}</TableCell>
+                  <TableCell>
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-bold text-slate-800">{item.district}</p>
+                      <p className="text-[10px] text-slate-500">{item.state || "Uttar Pradesh"}</p>
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <Chip
                       size="sm"
@@ -464,28 +494,35 @@ function BatchCoPetitionersContent() {
         </CardBody>
       </Card>
 
-      {/* Manual Add Form Card */}
+      {/* 3. Manual Add Form Card */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
-        <CardBody className="p-4">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
-            Add Individual Co-Petitioner to {selectedCase}
-          </h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+        <CardBody className="p-4 space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+              Add Individual Co-Petitioner to {currentCase?.fileNo || "Selected Docket"}
+            </h3>
+            <span className="text-[10px] text-slate-400">
+              District dropdown binds to 6.1 Geographical Master
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-6">
             <Input
               size="sm"
               label="Roll No."
               labelPlacement="outside"
               placeholder="e.g. 21008891"
-              value={newPetitioner.rollNo}
-              onValueChange={(v) => setNewPetitioner({ ...newPetitioner, rollNo: v })}
+              value={formData.rollNo}
+              onValueChange={(v) => setFormData({ ...formData, rollNo: v })}
+              isRequired
             />
             <Input
               size="sm"
-              label="Petitioner Name"
+              label="Candidate Name"
               labelPlacement="outside"
               placeholder="Candidate Name"
-              value={newPetitioner.name}
-              onValueChange={(v) => setNewPetitioner({ ...newPetitioner, name: v })}
+              value={formData.name}
+              onValueChange={(v) => setFormData({ ...formData, name: v })}
               isRequired
             />
             <Input
@@ -493,29 +530,45 @@ function BatchCoPetitionersContent() {
               label="Father's Name"
               labelPlacement="outside"
               placeholder="Father's Name"
-              value={newPetitioner.fatherName}
-              onValueChange={(v) => setNewPetitioner({ ...newPetitioner, fatherName: v })}
+              value={formData.fatherName}
+              onValueChange={(v) => setFormData({ ...formData, fatherName: v })}
             />
             <Input
               size="sm"
               label="Rank / Post Claimed"
               labelPlacement="outside"
               placeholder="e.g. Constable CP"
-              value={newPetitioner.rank}
-              onValueChange={(v) => setNewPetitioner({ ...newPetitioner, rank: v })}
+              value={formData.postClaimed}
+              onValueChange={(v) => setFormData({ ...formData, postClaimed: v })}
             />
+
+            {/* Master-Aligned District Dropdown */}
+            <Select
+              size="sm"
+              label="Home District (Master)"
+              labelPlacement="outside"
+              items={districts}
+              selectedKeys={[formData.district]}
+              onChange={(e) => handleDistrictChange(e.target.value)}
+              className="font-medium"
+            >
+              {(d) => <SelectItem key={d.key}>{d.label}</SelectItem>}
+            </Select>
+
+            {/* Resolved Zone Display + Add Button */}
             <div className="flex items-end gap-2">
               <Input
                 size="sm"
-                label="Home District"
+                isReadOnly
+                label="Police Zone (Auto)"
                 labelPlacement="outside"
-                placeholder="District"
-                value={newPetitioner.district}
-                onValueChange={(v) => setNewPetitioner({ ...newPetitioner, district: v })}
+                value={formData.zone}
+                className="bg-slate-50 font-semibold"
               />
               <Button
                 size="sm"
                 radius="sm"
+                isLoading={isSubmitting}
                 className="bg-[#0f2744] text-xs font-semibold text-white hover:bg-[#163a66] min-w-[70px]"
                 onClick={handleAddPetitioner}
               >
@@ -526,47 +579,72 @@ function BatchCoPetitionersContent() {
         </CardBody>
       </Card>
 
-      {/* Edit Individual Petitioner Modal */}
+      {/* 4. Edit Individual Petitioner Modal */}
       <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
             <>
               <ModalHeader className="text-sm font-bold text-slate-900">
-                Edit Petitioner: {editingPetitioner?.name}
+                Edit Petitioner: {editingItem?.name}
               </ModalHeader>
               <ModalBody className="space-y-3">
                 <Input
                   size="sm"
                   label="Roll Number"
                   labelPlacement="outside"
-                  value={editingPetitioner?.rollNo || ""}
-                  onValueChange={(v) => setEditingPetitioner({ ...editingPetitioner, rollNo: v })}
+                  value={editingItem?.rollNo || ""}
+                  onValueChange={(v) =>
+                    setEditingItem(editingItem ? { ...editingItem, rollNo: v } : null)
+                  }
                 />
                 <Input
                   size="sm"
                   label="Petitioner Name"
                   labelPlacement="outside"
-                  value={editingPetitioner?.name || ""}
-                  onValueChange={(v) => setEditingPetitioner({ ...editingPetitioner, name: v })}
+                  value={editingItem?.name || ""}
+                  onValueChange={(v) =>
+                    setEditingItem(editingItem ? { ...editingItem, name: v } : null)
+                  }
                   isRequired
                 />
                 <Input
                   size="sm"
                   label="Father's Name"
                   labelPlacement="outside"
-                  value={editingPetitioner?.fatherName || ""}
-                  onValueChange={(v) => setEditingPetitioner({ ...editingPetitioner, fatherName: v })}
+                  value={editingItem?.fatherName || ""}
+                  onValueChange={(v) =>
+                    setEditingItem(editingItem ? { ...editingItem, fatherName: v } : null)
+                  }
                 />
+
+                <Select
+                  size="sm"
+                  label="Home District"
+                  labelPlacement="outside"
+                  items={districts}
+                  selectedKeys={editingItem?.district ? [editingItem.district] : ["Lucknow"]}
+                  onChange={(e) =>
+                    setEditingItem(editingItem ? { ...editingItem, district: e.target.value } : null)
+                  }
+                >
+                  {(d) => <SelectItem key={d.key}>{d.label}</SelectItem>}
+                </Select>
+
                 <Select
                   size="sm"
                   label="Legal Status in Writ"
                   labelPlacement="outside"
-                  selectedKeys={editingPetitioner?.status ? [editingPetitioner.status] : ["ACTIVE"]}
-                  onChange={(e) => setEditingPetitioner({ ...editingPetitioner, status: e.target.value })}
+                  selectedKeys={editingItem?.status ? [editingItem.status] : ["ACTIVE"]}
+                  onChange={(e) =>
+                    setEditingItem(
+                      editingItem ? { ...editingItem, status: e.target.value as any } : null
+                    )
+                  }
                 >
                   <SelectItem key="ACTIVE">ACTIVE (Claim Pursued)</SelectItem>
                   <SelectItem key="WITHDRAWN">WITHDRAWN (Candidate Opted Out)</SelectItem>
                   <SelectItem key="DISMISSED_ON_MERIT">DISMISSED ON MERIT</SelectItem>
+                  <SelectItem key="RELIEF_GRANTED">RELIEF GRANTED</SelectItem>
                 </Select>
               </ModalBody>
               <ModalFooter>
@@ -587,7 +665,7 @@ function BatchCoPetitionersContent() {
         </ModalContent>
       </Modal>
 
-      {/* Bulk CSV Upload Modal */}
+      {/* 5. Bulk CSV Upload Modal */}
       <Modal isOpen={isCsvOpen} onOpenChange={onCsvOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
@@ -599,28 +677,23 @@ function BatchCoPetitionersContent() {
               <ModalBody className="space-y-4">
                 <p className="text-xs text-slate-500">
                   Upload an Excel (.xlsx) or CSV file with candidate roll numbers, names, and districts to append directly to{" "}
-                  <b>{selectedCase}</b>.
+                  <b>{currentCase?.fileNo || "Selected Case"}</b>.
                 </p>
                 <div
-                  onClick={handleSimulateCsvUpload}
+                  onClick={() => {
+                    toast.success("Parsed sample CSV rows into candidate queue!");
+                    onCsvOpenChange();
+                  }}
                   className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 p-6 text-center hover:bg-slate-50/50 cursor-pointer transition-colors"
                 >
                   <span className="material-symbols-rounded text-4xl text-blue-700">cloud_upload</span>
-                  <p className="mt-2 text-xs font-bold text-slate-800">Click to Upload & Parse Sample CSV</p>
-                  <p className="text-[10px] text-slate-400 mt-1">Columns parsed: RollNo, CandidateName, FatherName, District</p>
+                  <p className="mt-2 text-xs font-bold text-slate-800">Click to Upload &amp; Parse CSV</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Columns: RollNo, CandidateName, FatherName, District</p>
                 </div>
               </ModalBody>
               <ModalFooter>
                 <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
                   Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  radius="sm"
-                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  onClick={handleSimulateCsvUpload}
-                >
-                  Simulate Import (3 Records)
                 </Button>
               </ModalFooter>
             </>

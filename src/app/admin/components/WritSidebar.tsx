@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Chip, Button } from "@nextui-org/react";
+import { useAppSelector, useAppDispatch } from "@/store/hooks";
+import { logoutAction, MenuItem } from "@/store/slices/authSlice";
+import toast from "react-hot-toast";
 
 interface WritSidebarProps {
   isMobileOpen: boolean;
@@ -12,21 +15,64 @@ interface WritSidebarProps {
 
 export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const dispatch = useAppDispatch();
+  const { user } = useAppSelector((state) => state.auth);
 
-  // Accordion open/close state
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({
-    cases: true,
-    compliance: false,
-    masters: true,   // मास्टर्स हमेशा आसानी से दिखें
-    admin: false,
-  });
+  // Dynamic Accordion State map
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const toggle = (key: string) => {
+  const toggleAccordion = (key: string) => {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const isActive = (route: string) => pathname === route;
   const isStartsWith = (route: string) => pathname.startsWith(route);
+
+  // Group menus strictly according to backend database structure
+  const groupedMenus = useMemo(() => {
+    const list: MenuItem[] = user?.allowedMenus || [];
+    console.log(`[LexWrit Sidebar] Dynamic Menu Engine: Hydrating ${list.length} menus from DB`);
+
+    const map: Record<string, MenuItem[]> = {};
+    list.forEach((menu) => {
+      const group = menu.groupTitle || "OPERATIONS";
+      if (!map[group]) map[group] = [];
+      map[group].push(menu);
+    });
+
+    return map;
+  }, [user?.allowedMenus]);
+
+  // Auto-expand accordion if the current path matches one of its submenus
+  useEffect(() => {
+    if (!user?.allowedMenus) return;
+    const updates: Record<string, boolean> = {};
+
+    user.allowedMenus.forEach((menu) => {
+      if (menu.subMenus && menu.subMenus.length > 0) {
+        const hasActiveSub = menu.subMenus.some(
+          (sub) => pathname === sub.path || pathname.startsWith(sub.path)
+        );
+        if (hasActiveSub) {
+          updates[menu.key] = true;
+        }
+      }
+    });
+
+    if (Object.keys(updates).length > 0) {
+      setExpanded((prev) => ({ ...prev, ...updates }));
+    }
+  }, [pathname, user?.allowedMenus]);
+
+  const handleLogout = () => {
+    console.log("[LexWrit Sidebar] Sign-out triggered by:", user?.username);
+    dispatch(logoutAction());
+    toast.success("Logged out successfully.");
+    router.replace("/");
+  };
+
+  const userInitial = user?.name ? user.name.charAt(0).toUpperCase() : "A";
 
   return (
     <>
@@ -51,7 +97,7 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
             <div>
               <div className="flex items-center gap-1.5">
                 <h1 className="text-xs font-bold uppercase tracking-wider text-white">UPPRPB</h1>
-                <Chip size="sm" className="h-4 bg-blue-500/20 px-1 text-[9px] font-bold text-blue-300">
+                <Chip size="sm" className="h-4 bg-blue-500/20 px-1 text-[9px] font-bold text-blue-300 font-mono">
                   WCMS
                 </Chip>
               </div>
@@ -69,478 +115,132 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
           </Button>
         </div>
 
-        {/* Scrollable Navigation */}
+        {/* Scrollable Dynamic Navigation */}
         <div className="flex-1 space-y-4 overflow-y-auto px-3 py-4 text-xs">
-          {/* SECTION 1: OPERATIONS & CASES */}
-          <div>
-            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400/80">
-              Operations & Case Hub
-            </p>
-            <nav className="space-y-1">
-              <Link
-                href="/admin"
-                onClick={() => setIsMobileOpen(false)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2 font-medium transition-colors ${
-                  isActive("/admin")
-                    ? "bg-white/15 font-semibold text-white shadow-sm"
-                    : "text-slate-300 hover:bg-white/5 hover:text-white"
-                }`}
-              >
-                <span className="material-symbols-rounded text-lg">grid_view</span>
-                <span>1.0 Dashboard Cockpit</span>
-              </Link>
+          {Object.keys(groupedMenus).length > 0 ? (
+            Object.entries(groupedMenus).map(([groupTitle, menus]) => (
+              <div key={groupTitle}>
+                <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400/80">
+                  {groupTitle}
+                </p>
+                <nav className="space-y-1">
+                  {menus.map((menu) => {
+                    const hasSubMenus = menu.subMenus && menu.subMenus.length > 0;
+                    const isGroupOpen = expanded[menu.key] ?? false;
+                    const menuActive =
+                      isActive(menu.path) || (menu.path !== "/admin" && isStartsWith(menu.path));
 
-              {/* 2.0 Writ & Case Hub Accordion */}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => toggle("cases")}
-                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 font-medium text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="material-symbols-rounded text-lg text-slate-400">balance</span>
-                    <span>2.0 Writ & Case Hub</span>
-                  </div>
-                  <span className="material-symbols-rounded text-sm text-slate-400">
-                    {expanded.cases ? "expand_more" : "chevron_right"}
-                  </span>
-                </button>
+                    if (hasSubMenus) {
+                      return (
+                        <div key={menu.key}>
+                          <button
+                            type="button"
+                            onClick={() => toggleAccordion(menu.key)}
+                            className="flex w-full items-center justify-between rounded-lg px-3 py-2 font-medium text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="material-symbols-rounded text-lg text-slate-400">
+                                {menu.icon || "folder"}
+                              </span>
+                              <span>{menu.label}</span>
+                            </div>
+                            <span className="material-symbols-rounded text-sm text-slate-400">
+                              {isGroupOpen ? "expand_more" : "chevron_right"}
+                            </span>
+                          </button>
 
-                {expanded.cases && (
-                  <div className="ml-5 mt-1 space-y-1 border-l border-white/10 pl-3">
-                    <Link
-                      href="/admin/cases"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/cases")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">description</span>
-                      <span>2.1 Case Register (Index)</span>
-                    </Link>
+                          {isGroupOpen && (
+                            <div className="ml-5 mt-1 space-y-1 border-l border-white/10 pl-3">
+                              {menu.subMenus!.map((sub) => {
+                                const subActive = isActive(sub.path);
+                                return (
+                                  <Link
+                                    key={sub.key}
+                                    href={sub.path}
+                                    onClick={() => setIsMobileOpen(false)}
+                                    className={`flex items-center justify-between rounded-md px-2.5 py-1.5 transition-colors ${
+                                      subActive
+                                        ? "bg-white/15 font-semibold text-white"
+                                        : "text-slate-400 hover:bg-white/5 hover:text-white"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 truncate">
+                                      <span className="material-symbols-rounded text-sm">
+                                        {sub.icon || "description"}
+                                      </span>
+                                      <span className="truncate">{sub.label}</span>
+                                    </div>
+                                    {sub.badge && (
+                                      <Chip
+                                        size="sm"
+                                        className={`h-4 px-1 text-[9px] font-bold ${
+                                          sub.badgeColor === "danger"
+                                            ? "bg-rose-500 text-white"
+                                            : sub.badgeColor === "warning"
+                                            ? "bg-amber-500/20 text-amber-300"
+                                            : "bg-blue-500/20 text-blue-300"
+                                        }`}
+                                      >
+                                        {sub.badge}
+                                      </Chip>
+                                    )}
+                                  </Link>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
 
-                    <Link
-                      href="/admin/cases/register"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/cases/register")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">post_add</span>
-                      <span>2.2 Intake (CNR Wizard)</span>
-                    </Link>
-
-                    <Link
-                      href="/admin/cases/batch"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/cases/batch")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">group</span>
-                      <span>2.3 Co-Petitioners</span>
-                    </Link>
-
-                    <Link
-                      href="/admin/cases/discovery"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center justify-between rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/cases/discovery")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-rounded text-sm text-amber-400">radar</span>
-                        <span>2.4 Inward Discovery</span>
-                      </div>
-                      <Chip size="sm" className="h-4 bg-amber-500/20 px-1 text-[9px] font-bold text-amber-300">
-                        AUTO
-                      </Chip>
-                    </Link>
-                  </div>
-                )}
+                    // Standard Single Menu Item
+                    return (
+                      <Link
+                        key={menu.key}
+                        href={menu.path}
+                        onClick={() => setIsMobileOpen(false)}
+                        className={`flex items-center gap-3 rounded-lg px-3 py-2 font-medium transition-colors ${
+                          menuActive
+                            ? "bg-white/15 font-semibold text-white shadow-sm"
+                            : "text-slate-300 hover:bg-white/5 hover:text-white"
+                        }`}
+                      >
+                        <span className="material-symbols-rounded text-lg">
+                          {menu.icon || "grid_view"}
+                        </span>
+                        <span>{menu.label}</span>
+                      </Link>
+                    );
+                  })}
+                </nav>
               </div>
-
-              {/* 3.0 Document DMS */}
-              <Link
-                href="/admin/documents"
-                onClick={() => setIsMobileOpen(false)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2 font-medium transition-colors ${
-                  isStartsWith("/admin/documents")
-                    ? "bg-white/15 font-semibold text-white shadow-sm"
-                    : "text-slate-300 hover:bg-white/5 hover:text-white"
-                }`}
-              >
-                <span className="material-symbols-rounded text-lg">folder_copy</span>
-                <span>3.0 Document DMS & Tree</span>
-              </Link>
-
-              {/* 4.0 Green Sheet Notings */}
-              <Link
-                href="/admin/communications/notings"
-                onClick={() => setIsMobileOpen(false)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2 font-medium transition-colors ${
-                  isStartsWith("/admin/communications/notings")
-                    ? "bg-white/15 font-semibold text-white shadow-sm"
-                    : "text-slate-300 hover:bg-white/5 hover:text-white"
-                }`}
-              >
-                <span className="material-symbols-rounded text-lg">edit_note</span>
-                <span>4.0 Green Sheet Notings</span>
-              </Link>
-            </nav>
-          </div>
-
-          {/* SECTION 2: COMPLIANCE */}
-          <div>
-            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400/80">
-              Judicial Orders & Risk
-            </p>
-            <nav className="space-y-1">
-              <div>
-                <button
-                  type="button"
-                  onClick={() => toggle("compliance")}
-                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 font-medium text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="material-symbols-rounded text-lg text-rose-400">schedule</span>
-                    <span>5.0 Directives & Stays</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Chip size="sm" className="h-4 bg-rose-500/20 px-1 text-[9px] font-bold text-rose-300">
-                      3 Overdue
-                    </Chip>
-                    <span className="material-symbols-rounded text-sm text-slate-400">
-                      {expanded.compliance ? "expand_more" : "chevron_right"}
-                    </span>
-                  </div>
-                </button>
-
-                {expanded.compliance && (
-                  <div className="ml-5 mt-1 space-y-1 border-l border-white/10 pl-3">
-                    <Link
-                      href="/admin/compliance/stays"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/compliance/stays")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">pause_circle</span>
-                      <span>5.1 Active Stays Roster</span>
-                    </Link>
-
-                    <Link
-                      href="/admin/compliance/contempt"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center justify-between rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/compliance/contempt")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-rounded text-sm text-rose-400">crisis_alert</span>
-                        <span>5.2 Contempt Radar</span>
-                      </div>
-                      <Chip size="sm" className="h-4 bg-rose-500 px-1 text-[9px] font-bold text-white">
-                        CRITICAL
-                      </Chip>
-                    </Link>
-
-                    <Link
-                      href="/admin/compliance/archive"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/compliance/archive")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">task_alt</span>
-                      <span>5.3 Compliance Archival</span>
-                    </Link>
-                  </div>
-                )}
-              </div>
-            </nav>
-          </div>
-
-          {/* SECTION 3: SYSTEM MASTERS (पुराने 15 मास्टर्स का संगठित रूप) */}
-          <div>
-            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400/80">
-              Institution Masters
-            </p>
-            <nav className="space-y-1">
-              <div>
-                <button
-                  type="button"
-                  onClick={() => toggle("masters")}
-                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 font-medium text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="material-symbols-rounded text-lg text-slate-400">database</span>
-                    <span>6.0 System Masters</span>
-                  </div>
-                  <span className="material-symbols-rounded text-sm text-slate-400">
-                    {expanded.masters ? "expand_more" : "chevron_right"}
-                  </span>
-                </button>
-
-                {expanded.masters && (
-                  <div className="ml-5 mt-1 space-y-1 border-l border-white/10 pl-3">
-                    {/* Old: District */}
-                    <Link
-                      href="/admin/masters/location"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/masters/location")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">map</span>
-                      <span>6.1 District & Zones</span>
-                    </Link>
-
-                    {/* Old: Department */}
-                    <Link
-                      href="/admin/masters/organization"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/masters/organization")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">domain</span>
-                      <span>6.2 Department / Units</span>
-                    </Link>
-
-                    {/* Old: Rank */}
-                    <Link
-                      href="/admin/masters/ranks"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/masters/ranks")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">military_tech</span>
-                      <span>6.3 Rank Master</span>
-                    </Link>
-
-                    {/* Old: Designation */}
-                    <Link
-                      href="/admin/masters/designations"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/masters/designations")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">badge</span>
-                      <span>6.4 Designation Master</span>
-                    </Link>
-
-                    {/* Old: Court & Case Type */}
-                    <Link
-                      href="/admin/masters/judicial"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/masters/judicial")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">account_balance</span>
-                      <span>6.5 Court & Case Types</span>
-                    </Link>
-
-                    {/* Old: Case Category, Sub Category, Subject */}
-                    <Link
-                      href="/admin/masters/taxonomy"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/masters/taxonomy")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">category</span>
-                      <span>6.6 Category & Subject Tree</span>
-                    </Link>
-
-                    {/* Old: Subject Wise Custodian */}
-                    <Link
-                      href="/admin/masters/custodians"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/masters/custodians")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">assignment_ind</span>
-                      <span>6.7 Subject Custodian Map</span>
-                    </Link>
-
-                    {/* Old: Respondents */}
-                    <Link
-                      href="/admin/masters/respondents"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/masters/respondents")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">groups</span>
-                      <span>6.8 Respondent Groups</span>
-                    </Link>
-
-                    {/* Old: Action Taken */}
-                    <Link
-                      href="/admin/masters/actions"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/masters/actions")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">rule</span>
-                      <span>6.9 Action Taken Mapping</span>
-                    </Link>
-
-                    {/* New: Keyword Alias Matrix */}
-                    <Link
-                      href="/admin/masters/aliases"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/masters/aliases")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">spellcheck</span>
-                      <span>6.10 Institution Aliases</span>
-                    </Link>
-                  </div>
-                )}
-              </div>
-            </nav>
-          </div>
-
-          {/* SECTION 4: ADMINISTRATION & USER MANAGEMENT */}
-          <div>
-            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400/80">
-              Users, Security & Audit
-            </p>
-            <nav className="space-y-1">
-              <div>
-                <button
-                  type="button"
-                  onClick={() => toggle("admin")}
-                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 font-medium text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="material-symbols-rounded text-lg text-slate-400">admin_panel_settings</span>
-                    <span>7.0 Admin & Security</span>
-                  </div>
-                  <span className="material-symbols-rounded text-sm text-slate-400">
-                    {expanded.admin ? "expand_more" : "chevron_right"}
-                  </span>
-                </button>
-
-                {expanded.admin && (
-                  <div className="ml-5 mt-1 space-y-1 border-l border-white/10 pl-3">
-                    {/* Old: Officer Master & User List */}
-                    <Link
-                      href="/admin/admin/users"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/admin/users")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">person_outline</span>
-                      <span>7.1 Officers & Users</span>
-                    </Link>
-
-                    {/* Old: User Role Master */}
-                    <Link
-                      href="/admin/admin/rbac"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/admin/rbac")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">manage_accounts</span>
-                      <span>7.2 Dynamic RBAC Roles</span>
-                    </Link>
-
-                    {/* New: Audit Trail */}
-                    <Link
-                      href="/admin/admin/audit-logs"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/admin/audit-logs")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">history</span>
-                      <span>7.3 Action & Audit Logs</span>
-                    </Link>
-
-                    {/* New: eCourts Sync Diagnostics */}
-                    <Link
-                      href="/admin/admin/sync-health"
-                      onClick={() => setIsMobileOpen(false)}
-                      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors ${
-                        isActive("/admin/admin/sync-health")
-                          ? "bg-white/15 font-semibold text-white"
-                          : "text-slate-400 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <span className="material-symbols-rounded text-sm">sync_saved_locally</span>
-                      <span>7.4 eCourts Sync Health</span>
-                    </Link>
-                  </div>
-                )}
-              </div>
-            </nav>
-          </div>
+            ))
+          ) : (
+            <div className="p-4 text-center text-xs text-slate-400">
+              Loading dynamic permission tree...
+            </div>
+          )}
         </div>
 
-        {/* User Card Pinned to Bottom */}
+        {/* Dynamic Logged-in User Profile Card */}
         <div className="border-t border-white/10 p-3">
           <div className="flex items-center gap-3 rounded-lg bg-white/5 p-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow">
-              VS
+              {userInitial}
             </div>
             <div className="flex-1 overflow-hidden">
-              <p className="truncate text-xs font-semibold text-white">V. Sharma</p>
-              <p className="truncate text-[10px] text-slate-400">Registry Officer (OIC)</p>
+              <p className="truncate text-xs font-semibold text-white">{user?.name || "Officer"}</p>
+              <p className="truncate text-[10px] text-slate-400">
+                {user?.designation || user?.role || "Board Cadre"}
+              </p>
             </div>
-            <span className="material-symbols-rounded cursor-pointer text-slate-400 hover:text-white">
-              logout
-            </span>
+            <button
+              onClick={handleLogout}
+              title="Sign Out"
+              className="text-slate-400 hover:text-rose-400 transition-colors"
+            >
+              <span className="material-symbols-rounded text-lg">logout</span>
+            </button>
           </div>
         </div>
       </aside>

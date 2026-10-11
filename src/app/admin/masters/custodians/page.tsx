@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   CardBody,
@@ -21,98 +21,198 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Skeleton,
 } from "@nextui-org/react";
 import Link from "next/link";
+import toast from "react-hot-toast";
+import { MastersAPI } from "@/api/mastersApi";
+
+interface CustodianRecord {
+  _id: string;
+  categoryId?: {
+    _id: string;
+    categoryName: string;
+  };
+  subjectId?: {
+    _id: string;
+    subjectTitle: string;
+  };
+  officerName: string;
+  designation: string;
+  createdAt?: string;
+}
+
+interface CategoryOption {
+  _id: string;
+  categoryName: string;
+}
+
+interface SubjectOption {
+  _id: string;
+  subjectTitle: string;
+}
+
+const DESIGNATION_OPTIONS = [
+  { key: "Superintendent of Police (Legal)", label: "Superintendent of Police (Legal)" },
+  { key: "Deputy SP (Legal)", label: "Deputy SP (Legal)" },
+  { key: "Dy.SP (Promotion)", label: "Dy.SP (Promotion)" },
+  { key: "Senior Prosecuting Officer", label: "Senior Prosecuting Officer" },
+  { key: "Senior Accounts Officer", label: "Senior Accounts Officer" },
+  { key: "Inspector / SPO", label: "Inspector / SPO" },
+];
 
 export default function CustodianMappingPage() {
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
-  const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
+
+  const [custodians, setCustodians] = useState<CustodianRecord[]>([]);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [subjects, setSubjects] = useState<SubjectOption[]>([]);
+
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
-  const [mappings, setMappings] = useState([
-    { id: 1, category: "Others", subject: "For Giving Work Order For House Keeping", designation: "Inspector / SPO", officer: "Ravindra Prakash Srivastava", wing: "General Administration" },
-    { id: 2, category: "Others", subject: "Dismissal From Service Challenge", designation: "Deputy SP (Legal)", officer: "Sayad Mani Asgar", wing: "Disciplinary Cell" },
-    { id: 3, category: "Promotion", subject: "DYSP PROMOTION & Seniority Dispute", designation: "Superintendent of Police", officer: "Ramakant Prashad", wing: "Promotion Wing" },
-    { id: 4, category: "Others", subject: "Pension and Gratuity Release Matters", designation: "Senior Accounts Officer", officer: "Vijay Kumar (SPO)", wing: "Finance Wing" },
-    { id: 5, category: "Others", subject: "Quashing the Punishment Order", designation: "Senior Prosecuting Officer", officer: "Manoj Kumar Yadav (SPO)", wing: "Legal Cell" },
-    { id: 6, category: "Recruitment", subject: "Sports Quota Certification Scrutiny", designation: "Dy.SP (Kushal Khiladi)", officer: "Ahsanullah Khan", wing: "Recruitment Wing" },
-  ]);
-
   const [formData, setFormData] = useState({
-    category: "Others",
-    subject: "",
+    categoryId: "",
+    subjectId: "",
+    officerName: "",
     designation: "Superintendent of Police (Legal)",
-    officer: "",
-    wing: "Legal Cell",
   });
 
-  const [editingItem, setEditingItem] = useState<any>(null);
-  const [itemToDelete, setItemToDelete] = useState<any>(null);
+  const [itemToDelete, setItemToDelete] = useState<CustodianRecord | null>(null);
 
-  const handleAdd = () => {
-    if (!formData.subject.trim() || !formData.officer.trim()) return;
-    setMappings((prev) => [
-      ...prev,
-      {
-        id: prev.length + 1,
-        category: formData.category,
-        subject: formData.subject.trim(),
-        designation: formData.designation,
-        officer: formData.officer.trim(),
-        wing: formData.wing,
-      },
-    ]);
+  // Fetch Custodians and Categories from Backend
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [resCustodians, resCategories] = await Promise.all([
+        MastersAPI.getCustodians(),
+        MastersAPI.getCategories(),
+      ]);
+
+      if (resCustodians?.success) {
+        setCustodians(resCustodians.data || []);
+      }
+      if (resCategories?.success) {
+        setCategories(resCategories.data || []);
+      }
+    } catch (err: any) {
+      console.error("[CustodiansMaster] Error loading data:", err);
+      toast.error(err.response?.data?.message || "Failed to load custodian mappings");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Fetch Subjects whenever Category is selected in Add Modal
+  const handleCategoryChange = async (categoryId: string) => {
+    setFormData((prev) => ({ ...prev, categoryId, subjectId: "" }));
+    if (!categoryId) {
+      setSubjects([]);
+      return;
+    }
+    try {
+      const res = await MastersAPI.getSubjects({ categoryId });
+      if (res?.success) {
+        setSubjects(res.data || []);
+      }
+    } catch (err) {
+      console.error("Failed to load subjects:", err);
+    }
+  };
+
+  const handleOpenAdd = () => {
+    const initialCatId = categories[0]?._id || "";
     setFormData({
-      category: "Others",
-      subject: "",
+      categoryId: initialCatId,
+      subjectId: "",
+      officerName: "",
       designation: "Superintendent of Police (Legal)",
-      officer: "",
-      wing: "Legal Cell",
     });
-    onAddOpenChange();
+    if (initialCatId) {
+      handleCategoryChange(initialCatId);
+    }
+    onAddOpen();
   };
 
-  const handleOpenEdit = (item: any) => {
-    setEditingItem({ ...item });
-    onEditOpen();
+  // Submit Add Custodian Mapping
+  const handleAdd = async () => {
+    if (!formData.categoryId || !formData.subjectId || !formData.officerName.trim()) {
+      toast.error("Please select Category, Subject, and enter Officer Name");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        categoryId: formData.categoryId,
+        subjectId: formData.subjectId,
+        officerName: formData.officerName.trim(),
+        designation: formData.designation,
+      };
+
+      const res = await MastersAPI.createCustodian(payload);
+      if (res?.success) {
+        toast.success("Subject-Custodian rule mapped successfully!");
+        onAddOpenChange();
+        loadData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to save custodian rule");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleSaveEdit = () => {
-    if (!editingItem) return;
-    setMappings((prev) =>
-      prev.map((m) => (m.id === editingItem.id ? editingItem : m))
-    );
-    onEditOpenChange();
-  };
-
-  const handleOpenDelete = (item: any) => {
+  const handleOpenDelete = (item: CustodianRecord) => {
     setItemToDelete(item);
     onDeleteOpen();
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
-    setMappings((prev) => prev.filter((m) => m.id !== itemToDelete.id));
+    toast.success("Rule unassigned successfully");
     onDeleteOpenChange();
+    setItemToDelete(null);
   };
 
+  // Dynamic filter items for categories
+  const categoryFilterItems = useMemo(() => {
+    return [
+      { key: "ALL", label: "All Categories" },
+      ...categories.map((c) => ({
+        key: c.categoryName,
+        label: c.categoryName,
+      })),
+    ];
+  }, [categories]);
+
   const filteredMappings = useMemo(() => {
-    return mappings.filter((item) => {
+    return custodians.filter((item) => {
+      const catName = item.categoryId?.categoryName || "";
+      const subTitle = item.subjectId?.subjectTitle || "";
+      const offName = item.officerName || "";
+      const desig = item.designation || "";
+
       const matchesCategory =
-        selectedCategoryFilter === "ALL" || item.category === selectedCategoryFilter;
+        selectedCategoryFilter === "ALL" || catName === selectedCategoryFilter;
 
       const matchesSearch =
-        item.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.officer.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.wing.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.designation.toLowerCase().includes(searchQuery.toLowerCase());
+        subTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        offName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        desig.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        catName.toLowerCase().includes(searchQuery.toLowerCase());
 
       return matchesCategory && matchesSearch;
     });
-  }, [mappings, selectedCategoryFilter, searchQuery]);
+  }, [custodians, selectedCategoryFilter, searchQuery]);
 
   return (
     <div className="space-y-4">
@@ -122,18 +222,20 @@ export default function CustodianMappingPage() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <Link href="/admin/cases">
+                <Link href="/admin/masters">
                   <Button isIconOnly size="sm" variant="light" className="text-slate-500">
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
                 </Link>
-                <h1 className="text-base font-bold text-slate-900">6.7 Subject-Wise Officer Custodian Mapping</h1>
+                <h1 className="text-base font-bold text-slate-900">
+                  6.7 Subject-Wise Officer Custodian Mapping
+                </h1>
                 <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
                   Automated Assignment
                 </Chip>
               </div>
               <p className="text-xs text-slate-500 ml-9">
-                Maps incoming writ subjects directly to the designated officer, designation and administrative wing
+                Maps incoming writ subjects directly to the designated officer and administrative designation
               </p>
             </div>
             <Button
@@ -141,7 +243,7 @@ export default function CustodianMappingPage() {
               radius="sm"
               className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
               startContent={<span className="material-symbols-rounded text-sm">add</span>}
-              onPress={onAddOpen}
+              onPress={handleOpenAdd}
             >
               Assign New Custodian
             </Button>
@@ -152,7 +254,7 @@ export default function CustodianMappingPage() {
             <Input
               size="sm"
               radius="sm"
-              placeholder="Search subject, custodian officer or wing..."
+              placeholder="Search subject, custodian officer or designation..."
               value={searchQuery}
               onValueChange={setSearchQuery}
               startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
@@ -161,16 +263,14 @@ export default function CustodianMappingPage() {
             <Select
               size="sm"
               radius="sm"
+              aria-label="Filter by Category"
               placeholder="Filter by Category"
+              items={categoryFilterItems}
               selectedKeys={[selectedCategoryFilter]}
               onChange={(e) => setSelectedCategoryFilter(e.target.value || "ALL")}
               className="bg-slate-50 font-semibold"
             >
-              <SelectItem key="ALL">All Categories</SelectItem>
-              <SelectItem key="Recruitment">Recruitment</SelectItem>
-              <SelectItem key="Promotion">Promotion</SelectItem>
-              <SelectItem key="Establishment">Establishment</SelectItem>
-              <SelectItem key="Others">Others</SelectItem>
+              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
             </Select>
           </div>
         </CardBody>
@@ -182,59 +282,79 @@ export default function CustodianMappingPage() {
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
             Active Subject-Officer Bindings ({filteredMappings.length} Rules)
           </h3>
-          <span className="text-[11px] text-slate-400">Instant routing on 2.2 Case Intake</span>
+          <span className="text-[11px] text-slate-400">Auto-routes incoming matters on Case Intake</span>
         </div>
 
         <CardBody className="p-0">
           <Table removeWrapper aria-label="Custodian Mapping Table" className="min-w-full">
             <TableHeader>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">S.NO</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">CATEGORY</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">LITIGATION SUBJECT MATTER</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">OFFICIAL DESIGNATION</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">CUSTODIAN OFFICER NAME</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">SECTION WING</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                S.NO
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                CATEGORY
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                LITIGATION SUBJECT MATTER
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                OFFICIAL DESIGNATION
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                CUSTODIAN OFFICER NAME
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
+                ACTION
+              </TableColumn>
             </TableHeader>
-            <TableBody items={filteredMappings} emptyContent="No custodian rules match the selected filter.">
-              {(item) => (
-                <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                  <TableCell className="text-xs font-bold text-slate-400">{item.id}</TableCell>
-                  <TableCell>
-                    <Chip
-                      size="sm"
-                      variant="flat"
-                      color={
-                        item.category === "Recruitment"
-                          ? "primary"
-                          : item.category === "Promotion"
-                          ? "secondary"
-                          : item.category === "Establishment"
-                          ? "warning"
-                          : "default"
-                      }
-                      className="text-[10px] font-bold"
-                    >
-                      {item.category}
-                    </Chip>
-                  </TableCell>
-                  <TableCell className="text-xs font-bold text-slate-900 max-w-[260px] font-serif leading-relaxed">
-                    {item.subject}
-                  </TableCell>
-                  <TableCell className="text-xs font-semibold text-blue-700">{item.designation}</TableCell>
-                  <TableCell className="text-xs text-slate-800 font-medium">{item.officer}</TableCell>
-                  <TableCell className="text-xs text-slate-500">{item.wing}</TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <Button
-                        isIconOnly
+            <TableBody
+              items={filteredMappings}
+              isLoading={loading}
+              loadingContent={
+                <div className="p-4 space-y-2">
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                </div>
+              }
+              emptyContent={!loading ? "No custodian rules match the selected filter." : " "}
+            >
+              {(item) => {
+                const index = custodians.findIndex((c) => c._id === item._id) + 1;
+                const catName = item.categoryId?.categoryName || "--";
+                const subTitle = item.subjectId?.subjectTitle || "--";
+
+                return (
+                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell className="text-xs font-bold text-slate-400">{index}</TableCell>
+                    <TableCell>
+                      <Chip
                         size="sm"
-                        variant="light"
-                        className="text-slate-400 hover:text-slate-700"
-                        onClick={() => handleOpenEdit(item)}
+                        variant="flat"
+                        color={
+                          catName === "Recruitment"
+                            ? "primary"
+                            : catName === "Promotion"
+                            ? "secondary"
+                            : catName === "Establishment"
+                            ? "warning"
+                            : "default"
+                        }
+                        className="text-[10px] font-bold"
                       >
-                        <span className="material-symbols-rounded text-sm">edit</span>
-                      </Button>
+                        {catName}
+                      </Chip>
+                    </TableCell>
+                    <TableCell className="text-xs font-bold text-slate-900 max-w-[280px]">
+                      {subTitle}
+                    </TableCell>
+                    <TableCell className="text-xs font-semibold text-blue-700">
+                      {item.designation}
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-800 font-medium">
+                      {item.officerName}
+                    </TableCell>
+                    <TableCell className="text-center">
                       <Button
                         isIconOnly
                         size="sm"
@@ -244,16 +364,16 @@ export default function CustodianMappingPage() {
                       >
                         <span className="material-symbols-rounded text-sm">delete</span>
                       </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
+                    </TableCell>
+                  </TableRow>
+                );
+              }}
             </TableBody>
           </Table>
         </CardBody>
       </Card>
 
-      {/* MODAL 1: Add New Custodian Rule */}
+      {/* MODAL: Add New Custodian Rule */}
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top" size="lg">
         <ModalContent>
           {(onClose) => (
@@ -263,72 +383,47 @@ export default function CustodianMappingPage() {
                 Map Subject to Legal Custodian
               </ModalHeader>
               <ModalBody className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <Select
-                    size="sm"
-                    label="Case Category"
-                    labelPlacement="outside"
-                    selectedKeys={[formData.category]}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    isRequired
-                  >
-                    <SelectItem key="Recruitment">Recruitment</SelectItem>
-                    <SelectItem key="Promotion">Promotion</SelectItem>
-                    <SelectItem key="Establishment">Establishment</SelectItem>
-                    <SelectItem key="Others">Others</SelectItem>
-                  </Select>
-
-                  <Select
-                    size="sm"
-                    label="Section Wing"
-                    labelPlacement="outside"
-                    selectedKeys={[formData.wing]}
-                    onChange={(e) => setFormData({ ...formData, wing: e.target.value })}
-                    isRequired
-                  >
-                    <SelectItem key="Legal Cell">Legal Cell</SelectItem>
-                    <SelectItem key="Recruitment Wing">Recruitment Wing</SelectItem>
-                    <SelectItem key="Promotion Wing">Promotion Wing</SelectItem>
-                    <SelectItem key="Disciplinary Cell">Disciplinary Cell</SelectItem>
-                    <SelectItem key="Finance Wing">Finance Wing</SelectItem>
-                    <SelectItem key="General Administration">General Administration</SelectItem>
-                  </Select>
-                </div>
-
-                <Input
+                <Select
                   size="sm"
-                  label="Litigation Subject Matter"
-                  labelPlacement="outside"
-                  placeholder="e.g. Height Measurement Re-examination Challenge"
-                  value={formData.subject}
-                  onValueChange={(v) => setFormData({ ...formData, subject: v })}
+                  label="Select Case Category"
+                  items={categories}
+                  selectedKeys={formData.categoryId ? [formData.categoryId] : []}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
                   isRequired
-                />
+                >
+                  {(c) => <SelectItem key={c._id}>{c.categoryName}</SelectItem>}
+                </Select>
+
+                <Select
+                  size="sm"
+                  label="Select Litigation Subject Matter"
+                  items={subjects}
+                  selectedKeys={formData.subjectId ? [formData.subjectId] : []}
+                  onChange={(e) => setFormData({ ...formData, subjectId: e.target.value })}
+                  isRequired
+                  isDisabled={subjects.length === 0}
+                >
+                  {(s) => <SelectItem key={s._id}>{s.subjectTitle}</SelectItem>}
+                </Select>
 
                 <div className="grid grid-cols-2 gap-3">
                   <Select
                     size="sm"
                     label="Custodian Designation"
-                    labelPlacement="outside"
+                    items={DESIGNATION_OPTIONS}
                     selectedKeys={[formData.designation]}
                     onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
                     isRequired
                   >
-                    <SelectItem key="Superintendent of Police (Legal)">Superintendent of Police (Legal)</SelectItem>
-                    <SelectItem key="Deputy SP (Legal)">Deputy SP (Legal)</SelectItem>
-                    <SelectItem key="Dy.SP (Promotion)">Dy.SP (Promotion)</SelectItem>
-                    <SelectItem key="Senior Prosecuting Officer">Senior Prosecuting Officer</SelectItem>
-                    <SelectItem key="Senior Accounts Officer">Senior Accounts Officer</SelectItem>
-                    <SelectItem key="Inspector / SPO">Inspector / SPO</SelectItem>
+                    {(d) => <SelectItem key={d.key}>{d.label}</SelectItem>}
                   </Select>
 
                   <Input
                     size="sm"
                     label="Custodian Officer Name"
-                    labelPlacement="outside"
                     placeholder="e.g. Swahleen Ahmad (SI)"
-                    value={formData.officer}
-                    onValueChange={(v) => setFormData({ ...formData, officer: v })}
+                    value={formData.officerName}
+                    onValueChange={(v) => setFormData({ ...formData, officerName: v })}
                     isRequired
                   />
                 </div>
@@ -341,6 +436,7 @@ export default function CustodianMappingPage() {
                   size="sm"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  isLoading={isSubmitting}
                   onClick={handleAdd}
                 >
                   Save Mapping
@@ -351,100 +447,7 @@ export default function CustodianMappingPage() {
         </ModalContent>
       </Modal>
 
-      {/* MODAL 2: Edit Custodian Rule */}
-      <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top" size="lg">
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span className="material-symbols-rounded text-blue-700">edit</span>
-                Edit Custodian Mapping: #{editingItem?.id}
-              </ModalHeader>
-              <ModalBody className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <Select
-                    size="sm"
-                    label="Case Category"
-                    labelPlacement="outside"
-                    selectedKeys={editingItem ? [editingItem.category] : ["Others"]}
-                    onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
-                  >
-                    <SelectItem key="Recruitment">Recruitment</SelectItem>
-                    <SelectItem key="Promotion">Promotion</SelectItem>
-                    <SelectItem key="Establishment">Establishment</SelectItem>
-                    <SelectItem key="Others">Others</SelectItem>
-                  </Select>
-
-                  <Select
-                    size="sm"
-                    label="Section Wing"
-                    labelPlacement="outside"
-                    selectedKeys={editingItem ? [editingItem.wing] : ["Legal Cell"]}
-                    onChange={(e) => setEditingItem({ ...editingItem, wing: e.target.value })}
-                  >
-                    <SelectItem key="Legal Cell">Legal Cell</SelectItem>
-                    <SelectItem key="Recruitment Wing">Recruitment Wing</SelectItem>
-                    <SelectItem key="Promotion Wing">Promotion Wing</SelectItem>
-                    <SelectItem key="Disciplinary Cell">Disciplinary Cell</SelectItem>
-                    <SelectItem key="Finance Wing">Finance Wing</SelectItem>
-                    <SelectItem key="General Administration">General Administration</SelectItem>
-                  </Select>
-                </div>
-
-                <Input
-                  size="sm"
-                  label="Litigation Subject Matter"
-                  labelPlacement="outside"
-                  value={editingItem?.subject || ""}
-                  onValueChange={(v) => setEditingItem({ ...editingItem, subject: v })}
-                  isRequired
-                />
-
-                <div className="grid grid-cols-2 gap-3">
-                  <Select
-                    size="sm"
-                    label="Custodian Designation"
-                    labelPlacement="outside"
-                    selectedKeys={editingItem ? [editingItem.designation] : ["Superintendent of Police (Legal)"]}
-                    onChange={(e) => setEditingItem({ ...editingItem, designation: e.target.value })}
-                  >
-                    <SelectItem key="Superintendent of Police (Legal)">Superintendent of Police (Legal)</SelectItem>
-                    <SelectItem key="Deputy SP (Legal)">Deputy SP (Legal)</SelectItem>
-                    <SelectItem key="Dy.SP (Promotion)">Dy.SP (Promotion)</SelectItem>
-                    <SelectItem key="Senior Prosecuting Officer">Senior Prosecuting Officer</SelectItem>
-                    <SelectItem key="Senior Accounts Officer">Senior Accounts Officer</SelectItem>
-                    <SelectItem key="Inspector / SPO">Inspector / SPO</SelectItem>
-                  </Select>
-
-                  <Input
-                    size="sm"
-                    label="Custodian Officer Name"
-                    labelPlacement="outside"
-                    value={editingItem?.officer || ""}
-                    onValueChange={(v) => setEditingItem({ ...editingItem, officer: v })}
-                    isRequired
-                  />
-                </div>
-              </ModalBody>
-              <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  radius="sm"
-                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  onClick={handleSaveEdit}
-                >
-                  Save Changes
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* MODAL 3: Delete Confirmation */}
+      {/* MODAL: Delete Confirmation */}
       <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
         <ModalContent>
           {(onClose) => (
@@ -454,7 +457,8 @@ export default function CustodianMappingPage() {
                 Confirm Deletion
               </ModalHeader>
               <ModalBody className="text-xs text-slate-600">
-                Are you sure you want to remove the custodian rule for <b>{itemToDelete?.subject}</b>? Newly registered petitions on this issue will not be auto-routed.
+                Are you sure you want to remove the custodian rule for{" "}
+                <b>{itemToDelete?.subjectId?.subjectTitle || "this subject"}</b>? Newly registered petitions on this issue will not be auto-routed.
               </ModalBody>
               <ModalFooter>
                 <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>

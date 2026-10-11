@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   Table,
   TableHeader,
@@ -27,304 +27,387 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Skeleton,
 } from "@nextui-org/react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import toast from "react-hot-toast";
+import axiosClient from "@/api/axiosClient";
+
+interface ConnectedWritItem {
+  writNumber: string;
+  cnrNumber?: string;
+  petitionerName?: string;
+  taggedDate?: string;
+}
+
+interface CaseItem {
+  _id: string;
+  fileNo: string;
+  noticeNumber?: string;
+  writNumber?: string;
+  cnrNumber?: string;
+  identifierTier: 1 | 2 | 3 | 4;
+  court: string;
+  courtCode: string;
+  caseType: string;
+  benchLocation: string;
+  courtRoomNo?: string;
+  coramBench?: string;
+  leadPetitioner: string;
+  respondentString: string;
+  assignedOIC: string;
+  assignedPairokar: string;
+  sectionWing: string;
+  category: string;
+  subCategory?: string;
+  disputeSubject: string;
+  stage: string;
+  judicialStatus: string;
+  internalHold?: {
+    location: string;
+    holdDays: number;
+  };
+  ndoh: string | null;
+  hasActiveStay: boolean;
+  isContemptNotice: boolean;
+  connectedWrits: ConnectedWritItem[];
+  coPetitionersCount: number;
+  syncStatus: "LIVE_SYNCED" | "SCHEDULED" | "MANUAL_DOCKET" | "DISCREPANCY";
+  createdAt: string;
+}
+
+interface PillsMetrics {
+  all: number;
+  withConnected: number;
+  advanceNotice: number;
+  stayInForce: number;
+  contemptAlerts: number;
+}
 
 export default function CaseRegisterPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const hearingDateParam = searchParams.get("hearingDate");
+
+  // Sync Modal & Tagged Writs Modal Disclosures
   const { isOpen: isSyncOpen, onOpen: onSyncOpen, onOpenChange: onSyncOpenChange } = useDisclosure();
-  
-  const [filterValue, setFilterValue] = useState("");
-  const [tempFilter, setTempFilter] = useState("");
+  const { isOpen: isConnectedOpen, onOpen: onConnectedOpen, onOpenChange: onConnectedOpenChange } = useDisclosure();
+
+  // Data & Loading States
+  const [cases, setCases] = useState<CaseItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isAttaching, setIsAttaching] = useState<boolean>(false);
+
+  // Filters & Pagination State
+  const [search, setSearch] = useState<string>("");
+  const [tempSearch, setTempSearch] = useState<string>("");
   const [selectedCourt, setSelectedCourt] = useState<string>("ALL");
   const [selectedWing, setSelectedWing] = useState<string>("ALL");
-  const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
-  const [page, setPage] = useState(1);
-  const rowsPerPage = 5;
+  const [activePill, setActivePill] = useState<string>("all");
+  const [page, setPage] = useState<number>(1);
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const rowsPerPage = 10;
 
-  const [activeSyncCase, setActiveSyncCase] = useState<any>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
+  // Active Modals Item References
+  const [activeSyncCase, setActiveSyncCase] = useState<CaseItem | null>(null);
+  const [selectedLeadCase, setSelectedLeadCase] = useState<CaseItem | null>(null);
 
-  // Sample data
-  const [casesData, setCasesData] = useState([
-    {
-      id: "1",
-      cnrNumber: "UPHC010029312026",
-      internalFileNo: "PRPB-R/938/2026",
-      noticeNoYear: "67186 / 2026",
-      caseNoYear: "WRIT-A / 4012 / 2026",
-      court: "High Court Allahabad",
-      bench: "Principal Bench",
-      wing: "Recruitment Wing",
-      subCategory: "Dying in Harness Rules - SICP",
-      petitioner: "Abhay Gupta & 4 Others",
-      respondent: "State of UP & Chairman UPPRPB",
-      oic: "SP Legal (Cell-1)",
-      pairokar: "Shanu Pratap Singh",
-      ndoh: "22 Sep 2026",
-      ndohDays: "In 6 Days",
-      courtStatus: "Pending",
-      internalStatus: "PWC Awaited",
-      isStay: false,
-      isContempt: false,
-      syncBadge: "synced",
-    },
-    {
-      id: "2",
-      cnrNumber: "UPHC020011402026",
-      internalFileNo: "PRPB-R/942/2026",
-      noticeNoYear: "66714 / 2026",
-      caseNoYear: "WRIT-A / 4021 / 2026",
-      court: "High Court Lucknow",
-      bench: "Lucknow Bench",
-      wing: "Recruitment Wing",
-      subCategory: "Constable Civil Police Rec. 2023",
-      petitioner: "Vikas Kumar Yadav",
-      respondent: "Chairman UPPRPB & Ors",
-      oic: "Swahleen Ahmad (SI)",
-      pairokar: "Dashrath Lal",
-      ndoh: "18 Sep 2026",
-      ndohDays: "In 2 Days",
-      courtStatus: "Pending",
-      internalStatus: "Counter Filed",
-      isStay: false,
-      isContempt: true,
-      syncBadge: "synced",
-    },
-    {
-      id: "3",
-      cnrNumber: "UPHC010089212025",
-      internalFileNo: "PRPB-R/812/2025",
-      noticeNoYear: "57000 / 2025",
-      caseNoYear: "WRIT-A / 7100 / 2025",
-      court: "High Court Allahabad",
-      bench: "Principal Bench",
-      wing: "Promotion Wing",
-      subCategory: "Constable PAC Recruitment",
-      petitioner: "Rohit Kumar",
-      respondent: "DGP Headquarters & Board",
-      oic: "DySP Promotion",
-      pairokar: "Shanu Pratap Singh",
-      ndoh: "30 Sep 2026",
-      ndohDays: "In 14 Days",
-      courtStatus: "Pending",
-      internalStatus: "Stay In Force",
-      isStay: true,
-      isContempt: false,
-      syncBadge: "discrepancy",
-    },
-    {
-      id: "4",
-      cnrNumber: "UPHC010041122025",
-      internalFileNo: "PRPB-R/670/2025",
-      noticeNoYear: "47045 / 2025",
-      caseNoYear: "WRIT-A / 2025 / 19",
-      court: "High Court Allahabad",
-      bench: "Principal Bench",
-      wing: "Promotion Wing",
-      subCategory: "Sub Inspector Ranker Exam",
-      petitioner: "Sujit Yadav",
-      respondent: "State of UP",
-      oic: "Swahleen Ahmad (SI)",
-      pairokar: "Shanu Pratap Singh",
-      ndoh: "05 Oct 2026",
-      ndohDays: "In 19 Days",
-      courtStatus: "Disposed",
-      internalStatus: "Closed",
-      isStay: false,
-      isContempt: false,
-      syncBadge: "manual",
-    },
-  ]);
+  // New Tagged Writ Form State
+  const [newTaggedWritNo, setNewTaggedWritNo] = useState<string>("");
+  const [newTaggedPetitioner, setNewTaggedPetitioner] = useState<string>("");
 
-  const columns = [
-    { name: "SYNC", uid: "syncBadge" },
-    { name: "CNR & WRIT NO.", uid: "caseIdentity" },
-    { name: "COURT & BENCH", uid: "court" },
-    { name: "PARTIES", uid: "parties" },
-    { name: "SUB CATEGORY", uid: "subCategory" },
-    { name: "OFFICER & PAIROKAR", uid: "officer" },
-    { name: "NEXT HEARING (NDOH)", uid: "ndoh" },
-    { name: "STATUS", uid: "status" },
-    { name: "ACTIONS", uid: "actions" },
-  ];
+  // Metrics Pills Counters
+  const [metrics, setMetrics] = useState<PillsMetrics>({
+    all: 0,
+    withConnected: 0,
+    advanceNotice: 0,
+    stayInForce: 0,
+    contemptAlerts: 0,
+  });
 
-  // Filtering Logic
-  const filteredItems = useMemo(() => {
-    let filtered = [...casesData];
+  // Fetch Cases Function from Real Backend API
+  const fetchCases = useCallback(async () => {
+    setLoading(true);
+    try {
+      let statusFilter: string | undefined = undefined;
+      if (activePill === "with_connected") statusFilter = "with_connected";
+      else if (activePill === "advance_notice") statusFilter = "advance_notice";
+      else if (activePill === "stay") statusFilter = "stay";
+      else if (activePill === "contempt") statusFilter = "contempt";
 
-    if (filterValue) {
-      filtered = filtered.filter(
-        (item) =>
-          item.cnrNumber.toLowerCase().includes(filterValue.toLowerCase()) ||
-          item.caseNoYear.toLowerCase().includes(filterValue.toLowerCase()) ||
-          item.petitioner.toLowerCase().includes(filterValue.toLowerCase()) ||
-          item.noticeNoYear.toLowerCase().includes(filterValue.toLowerCase())
-      );
+      const params: Record<string, any> = {
+        page,
+        limit: rowsPerPage,
+      };
+
+      if (search.trim()) params.search = search.trim();
+      if (selectedCourt !== "ALL") params.court = selectedCourt;
+      if (selectedWing !== "ALL") params.wing = selectedWing;
+      if (statusFilter) params.statusFilter = statusFilter;
+
+      const response = await axiosClient.get("/cases", { params });
+
+      if (response.data?.success) {
+        setCases(response.data.data || []);
+        setTotalPages(response.data.pagination?.totalPages || 1);
+        setTotalCount(response.data.pagination?.total || 0);
+        if (response.data.pillsMetrics) {
+          setMetrics(response.data.pillsMetrics);
+        }
+      }
+    } catch (err: any) {
+      console.error("[CaseRegister] Error loading cases:", err);
+      toast.error(err.response?.data?.message || "Failed to load litigation register");
+    } finally {
+      setLoading(false);
     }
-    if (selectedCourt !== "ALL") {
-      filtered = filtered.filter((item) => item.court === selectedCourt);
-    }
-    if (selectedWing !== "ALL") {
-      filtered = filtered.filter((item) => item.wing === selectedWing);
-    }
-    if (selectedStatus === "STAY") {
-      filtered = filtered.filter((item) => item.isStay);
-    }
-    if (selectedStatus === "CONTEMPT") {
-      filtered = filtered.filter((item) => item.isContempt);
-    }
-    return filtered;
-  }, [casesData, filterValue, selectedCourt, selectedWing, selectedStatus]);
+  }, [page, search, selectedCourt, selectedWing, activePill]);
 
-  const items = useMemo(() => {
-    const start = (page - 1) * rowsPerPage;
-    return filteredItems.slice(start, start + rowsPerPage);
-  }, [page, filteredItems]);
+  useEffect(() => {
+    fetchCases();
+  }, [fetchCases]);
 
   const handleApplyFilters = () => {
-    setFilterValue(tempFilter);
+    setSearch(tempSearch);
     setPage(1);
   };
 
   const handleResetFilters = () => {
-    setFilterValue("");
-    setTempFilter("");
+    setSearch("");
+    setTempSearch("");
     setSelectedCourt("ALL");
     setSelectedWing("ALL");
-    setSelectedStatus("ALL");
+    setActivePill("all");
     setPage(1);
+    router.push("/admin/cases");
   };
 
-  const triggerSyncModal = (item: any) => {
-    setActiveSyncCase(item);
-    onSyncOpen();
-  };
-
-  const executeSync = () => {
+  // Trigger eCourts CIS Background Polling via Backend
+  const handleExecuteSync = async () => {
+    if (!activeSyncCase) return;
     setIsSyncing(true);
-    setTimeout(() => {
-      if (activeSyncCase) {
-        setCasesData((prev) =>
-          prev.map((c) =>
-            c.id === activeSyncCase.id
-              ? { ...c, syncBadge: "synced", ndoh: "24 Sep 2026", ndohDays: "In 8 Days" }
-              : c
-          )
-        );
+    try {
+      const response = await axiosClient.post(`/cases/${activeSyncCase._id}/sync-ecourts`);
+      if (response.data?.success) {
+        toast.success(`Docket ${activeSyncCase.fileNo} synchronized with eCourts Gateway!`, {
+          icon: "⚖️",
+        });
+        onSyncOpenChange();
+        fetchCases();
       }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "eCourts Sync Failed");
+    } finally {
       setIsSyncing(false);
-      onSyncOpenChange();
-    }, 1200);
+    }
   };
+
+  // Open Connected Writs Management Modal
+  const openConnectedModal = (leadCase: CaseItem) => {
+    setSelectedLeadCase(leadCase);
+    onConnectedOpen();
+  };
+
+  // Attach a new connected writ into the lead docket in Backend
+  const handleAttachWrit = async () => {
+    if (!newTaggedWritNo || !selectedLeadCase) return;
+    setIsAttaching(true);
+    try {
+      const response = await axiosClient.post(`/cases/${selectedLeadCase._id}/connected-writs`, {
+        writNumber: newTaggedWritNo.toUpperCase().trim(),
+        petitionerName: newTaggedPetitioner.trim() || "Tagged Litigant",
+      });
+
+      if (response.data?.success) {
+        toast.success("Connected writ tagged successfully!");
+        setSelectedLeadCase((prev) =>
+          prev
+            ? {
+                ...prev,
+                connectedWrits: response.data.connectedWrits,
+              }
+            : null
+        );
+        setNewTaggedWritNo("");
+        setNewTaggedPetitioner("");
+        fetchCases();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to tag connected writ");
+    } finally {
+      setIsAttaching(false);
+    }
+  };
+
+  // Columns Configuration
+  const columns = [
+    { name: "SYNC", uid: "syncBadge" },
+    { name: "FILE DOCKET NO.", uid: "fileDocketNo" },
+    { name: "JUDICIAL IDENTIFIERS & CONNECTED WRITS", uid: "judicialIdentity" },
+    { name: "COURT & BENCH", uid: "court" },
+    { name: "PARTIES", uid: "parties" },
+    { name: "OFFICER & PAIROKAR", uid: "officer" },
+    { name: "NEXT HEARING (NDOH)", uid: "ndoh" },
+    { name: "PROCEDURAL & INTERNAL HOLD STATUS", uid: "dualStatus" },
+    { name: "ACTIONS", uid: "actions" },
+  ];
 
   const renderCell = useCallback(
-    (item: any, columnKey: React.Key) => {
+    (item: CaseItem, columnKey: React.Key) => {
       switch (columnKey) {
         case "syncBadge":
           return (
             <div className="flex justify-center">
-              {item.syncBadge === "synced" && (
-                <Tooltip content="Synced with eCourts CIS < 24h ago">
+              {item.syncStatus === "LIVE_SYNCED" && (
+                <Tooltip content="Live synced with eCourts CIS">
                   <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-sm" />
                 </Tooltip>
               )}
-              {item.syncBadge === "discrepancy" && (
-                <Tooltip content="Discrepancy: Court record updated; please re-sync">
+              {item.syncStatus === "DISCREPANCY" && (
+                <Tooltip content="Discrepancy detected in judicial records">
                   <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-rose-500 shadow-sm" />
                 </Tooltip>
               )}
-              {item.syncBadge === "manual" && (
-                <Tooltip content="Standalone offline record">
+              {(item.syncStatus === "MANUAL_DOCKET" || item.syncStatus === "SCHEDULED") && (
+                <Tooltip content="Manual or scheduled docket">
                   <span className="inline-flex h-2.5 w-2.5 rounded-full bg-slate-400 shadow-sm" />
                 </Tooltip>
               )}
             </div>
           );
 
-        case "caseIdentity":
+        case "fileDocketNo":
           return (
             <div>
               <Link
-                href={`/admin/cases/${item.id}`}
-                className="font-mono text-xs font-bold text-slate-900 hover:text-blue-700 hover:underline"
+                href={`/admin/cases/${item._id}`}
+                className="font-mono text-xs font-black text-[#0f2744] hover:underline"
               >
-                {item.cnrNumber}
+                {item.fileNo}
               </Link>
-              <p className="text-xs font-bold text-blue-700">{item.caseNoYear}</p>
-              <p className="text-[10px] text-slate-400">Notice: {item.noticeNoYear}</p>
+              <p className="text-[10px] text-slate-400">Dak / Almirah Ref</p>
+            </div>
+          );
+
+        case "judicialIdentity":
+          return (
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="font-extrabold text-blue-800">
+                  {item.writNumber || "Awaiting Writ No."}
+                </span>
+                {item.noticeNumber && (
+                  <>
+                    <span>·</span>
+                    <span className="rounded bg-slate-100 px-1 font-mono text-[10px] text-slate-700">
+                      {item.noticeNumber}
+                    </span>
+                  </>
+                )}
+              </div>
+              <p className="font-mono text-[9px] text-slate-400">
+                CNR: {item.cnrNumber || "Awaiting Allotment"}
+              </p>
+
+              {item.connectedWrits && item.connectedWrits.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => openConnectedModal(item)}
+                  className="flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-extrabold text-blue-700 hover:bg-blue-100"
+                >
+                  <span className="material-symbols-rounded text-xs">link</span>
+                  <span>{item.connectedWrits.length} Connected Writs</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => openConnectedModal(item)}
+                  className="text-[9px] font-medium text-slate-400 hover:text-blue-700 hover:underline"
+                >
+                  + Tag Connected Writ
+                </button>
+              )}
             </div>
           );
 
         case "court":
           return (
             <div>
-              <p className="text-xs font-medium text-slate-800">{item.court}</p>
-              <p className="text-[10px] text-slate-400">{item.bench}</p>
+              <p className="text-xs font-semibold text-slate-800">{item.court}</p>
+              <p className="text-[10px] text-slate-400">
+                {item.benchLocation} Bench · {item.caseType}
+              </p>
             </div>
           );
 
         case "parties":
           return (
-            <div className="max-w-[180px]">
-              <p className="truncate text-xs font-semibold text-slate-900">{item.petitioner}</p>
-              <p className="truncate text-[11px] text-slate-500">vs {item.respondent}</p>
-            </div>
-          );
-
-        case "subCategory":
-          return (
-            <div className="max-w-[160px]">
-              <p className="truncate text-xs text-slate-700">{item.subCategory}</p>
+            <div className="max-w-[200px]">
+              <p className="truncate text-xs font-bold text-slate-900">{item.leadPetitioner}</p>
+              <p className="truncate text-[11px] text-slate-500">vs {item.respondentString}</p>
+              <span className="text-[9px] text-slate-400">{item.disputeSubject}</span>
             </div>
           );
 
         case "officer":
           return (
             <div>
-              <p className="text-xs font-medium text-slate-800">{item.oic}</p>
-              <p className="text-[10px] text-slate-500">Pairokar: {item.pairokar}</p>
+              <p className="text-xs font-bold text-slate-800">{item.assignedOIC}</p>
+              <p className="text-[10px] text-slate-500">Pairokar: {item.assignedPairokar}</p>
+              <p className="text-[9px] text-slate-400">{item.sectionWing}</p>
             </div>
           );
 
-        case "ndoh":
+        case "ndoh": {
+          const ndohDate = item.ndoh
+            ? new Date(item.ndoh).toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })
+            : "--";
           return (
             <div>
               <Chip
                 size="sm"
                 variant="flat"
-                color={item.isContempt ? "danger" : "warning"}
+                color={item.isContemptNotice ? "danger" : "warning"}
                 className="text-xs font-bold"
               >
-                {item.ndoh}
+                {ndohDate}
               </Chip>
-              <p className="mt-0.5 text-[10px] text-slate-400">{item.ndohDays}</p>
+              {item.courtRoomNo && item.courtRoomNo !== "--" && (
+                <p className="mt-0.5 text-[10px] text-slate-400">Court No: {item.courtRoomNo}</p>
+              )}
             </div>
           );
+        }
 
-        case "status":
+        case "dualStatus":
           return (
-            <div className="flex flex-col gap-1">
-              <Chip
-                size="sm"
-                variant="flat"
-                color={
-                  item.isContempt
-                    ? "danger"
-                    : item.isStay
-                    ? "danger"
-                    : item.internalStatus === "PWC Awaited"
-                    ? "warning"
-                    : "success"
-                }
-                className="text-xs font-semibold"
-              >
-                {item.internalStatus}
-              </Chip>
-              {item.isStay && (
-                <Chip size="sm" variant="solid" color="danger" className="h-4 px-1 text-[9px] font-bold">
-                  STAY IN FORCE
+            <div className="flex flex-col gap-1 max-w-[190px]">
+              <div className="flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+                <span className="text-[11px] font-bold text-slate-800">{item.stage}</span>
+              </div>
+
+              {item.internalHold && (
+                <div className="rounded border border-amber-200 bg-amber-50/70 px-1.5 py-0.5 text-[10px]">
+                  <span className="font-semibold text-amber-900">
+                    Hold: {item.internalHold.location}
+                  </span>
+                  <span className="ml-1 text-[9px] font-bold text-rose-600">
+                    ({item.internalHold.holdDays}d)
+                  </span>
+                </div>
+              )}
+
+              {item.hasActiveStay && (
+                <Chip size="sm" variant="solid" color="danger" className="h-4 px-1 text-[8px] font-extrabold">
+                  INTERIM STAY IN FORCE
                 </Chip>
               )}
             </div>
@@ -342,37 +425,47 @@ export default function CaseRegisterPage() {
                 <DropdownItem
                   key="view"
                   startContent={<span className="material-symbols-rounded text-sm">visibility</span>}
-                  onPress={() => router.push(`/admin/cases/${item.id}`)}
+                  onPress={() => router.push(`/admin/cases/${item._id}`)}
                 >
                   View 360° Dossier
                 </DropdownItem>
                 <DropdownItem
+                  key="tag_writs"
+                  startContent={<span className="material-symbols-rounded text-sm">link</span>}
+                  onPress={() => openConnectedModal(item)}
+                >
+                  Manage Connected Writs
+                </DropdownItem>
+                <DropdownItem
                   key="dms"
                   startContent={<span className="material-symbols-rounded text-sm">folder_open</span>}
-                  onPress={() => router.push(`/admin/documents?caseId=${item.id}`)}
+                  onPress={() => router.push(`/admin/documents?caseId=${item._id}`)}
                 >
                   Open E-File DMS
                 </DropdownItem>
                 <DropdownItem
                   key="noting"
                   startContent={<span className="material-symbols-rounded text-sm">edit_note</span>}
-                  onPress={() => router.push(`/admin/communications/notings?caseId=${item.id}`)}
+                  onPress={() => router.push(`/admin/communications/notings?caseId=${item._id}`)}
                 >
                   Green Sheet Noting
                 </DropdownItem>
                 <DropdownItem
                   key="sync"
                   startContent={<span className="material-symbols-rounded text-sm">sync</span>}
-                  onPress={() => triggerSyncModal(item)}
+                  onPress={() => {
+                    setActiveSyncCase(item);
+                    onSyncOpen();
+                  }}
                 >
-                  Re-sync eCourts API
+                  Re-sync eCourts NAPIX
                 </DropdownItem>
               </DropdownMenu>
             </Dropdown>
           );
 
         default:
-          return <p className="text-xs">{item[columnKey as any]}</p>;
+          return <p className="text-xs">--</p>;
       }
     },
     [router]
@@ -385,9 +478,11 @@ export default function CaseRegisterPage() {
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h1 className="text-base font-bold text-slate-900">2.1 Case Register (Writ Index)</h1>
+              <h1 className="text-base font-bold text-slate-900">
+                2.1 Case Register (Master Writ &amp; Connected Writs Index)
+              </h1>
               <p className="text-xs text-slate-500">
-                Centralized database of High Court, Supreme Court & Tribunal petitions[cite: 1]
+                Standalone File Docket · Judicial Notice/Writ/CNR · Connected Writs · Dual Court/Hold Status
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -397,7 +492,7 @@ export default function CaseRegisterPage() {
                 radius="sm"
                 className="border-slate-200 bg-white text-xs font-semibold text-slate-700"
                 startContent={<span className="material-symbols-rounded text-sm">download</span>}
-                onClick={() => alert("Generating consolidated Excel export for filtered records...")}
+                onClick={() => toast.success("Preparing consolidated MIS Excel export...")}
               >
                 Export XLS
               </Button>
@@ -408,52 +503,95 @@ export default function CaseRegisterPage() {
                   className="bg-[#0f2744] text-xs font-semibold text-white shadow-sm hover:bg-[#163a66]"
                   startContent={<span className="material-symbols-rounded text-sm">add</span>}
                 >
-                  New Case Registration
+                  New Case Intake
                 </Button>
               </Link>
             </div>
           </div>
 
-          {/* Filter Status Badges */}
+          {/* Active Filter Chips & Metrics Banner */}
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+            {hearingDateParam && (
+              <Chip size="sm" color="primary" variant="flat" className="font-bold text-xs">
+                📅 Hearing Date: {hearingDateParam}
+              </Chip>
+            )}
+
             <Chip
               size="sm"
-              variant={selectedStatus === "ALL" ? "solid" : "flat"}
+              variant={activePill === "all" ? "solid" : "flat"}
               className={`cursor-pointer text-xs font-semibold ${
-                selectedStatus === "ALL" ? "bg-[#0f2744] text-white" : "bg-slate-100 text-slate-700"
+                activePill === "all" ? "bg-[#0f2744] text-white" : "bg-slate-100 text-slate-700"
               }`}
-              onClick={() => setSelectedStatus("ALL")}
+              onClick={() => {
+                setActivePill("all");
+                setPage(1);
+              }}
             >
-              All Writs ({casesData.length})
+              All Dockets ({metrics.all})
             </Chip>
+
             <Chip
               size="sm"
-              variant={selectedStatus === "STAY" ? "solid" : "flat"}
-              color="danger"
+              variant={activePill === "with_connected" ? "solid" : "flat"}
+              color="primary"
               className="cursor-pointer text-xs font-semibold"
-              onClick={() => setSelectedStatus("STAY")}
+              onClick={() => {
+                setActivePill("with_connected");
+                setPage(1);
+              }}
             >
-              ⚠️ Stay in Force ({casesData.filter((c) => c.isStay).length})
+              🔗 With Connected Writs ({metrics.withConnected})
             </Chip>
+
             <Chip
               size="sm"
-              variant={selectedStatus === "CONTEMPT" ? "solid" : "flat"}
+              variant={activePill === "advance_notice" ? "solid" : "flat"}
+              color="warning"
+              className="cursor-pointer text-xs font-semibold"
+              onClick={() => {
+                setActivePill("advance_notice");
+                setPage(1);
+              }}
+            >
+              📄 Advance Notice Stage ({metrics.advanceNotice})
+            </Chip>
+
+            <Chip
+              size="sm"
+              variant={activePill === "stay" ? "solid" : "flat"}
               color="danger"
               className="cursor-pointer text-xs font-semibold"
-              onClick={() => setSelectedStatus("CONTEMPT")}
+              onClick={() => {
+                setActivePill("stay");
+                setPage(1);
+              }}
             >
-              🔴 Contempt Alerts ({casesData.filter((c) => c.isContempt).length})
+              ⚠️ Stay in Force ({metrics.stayInForce})
+            </Chip>
+
+            <Chip
+              size="sm"
+              variant={activePill === "contempt" ? "solid" : "flat"}
+              color="danger"
+              className="cursor-pointer text-xs font-semibold"
+              onClick={() => {
+                setActivePill("contempt");
+                setPage(1);
+              }}
+            >
+              🔴 Contempt Alerts ({metrics.contemptAlerts})
             </Chip>
           </div>
 
-          {/* Search and Filters Bar */}
+          {/* Universal Search & Master Dropdown Filters */}
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
             <Input
               size="sm"
               radius="sm"
-              placeholder="Search CNR, Writ No, Party, Notice..."
-              value={tempFilter}
-              onValueChange={setTempFilter}
+              placeholder="Search File No, Writ, Notice, CNR, Litigant..."
+              value={tempSearch}
+              onValueChange={setTempSearch}
               onKeyDown={(e) => e.key === "Enter" && handleApplyFilters()}
               startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
               className="bg-slate-50"
@@ -464,12 +602,17 @@ export default function CaseRegisterPage() {
               radius="sm"
               placeholder="Select Court"
               selectedKeys={[selectedCourt]}
-              onChange={(e) => setSelectedCourt(e.target.value)}
+              onChange={(e) => {
+                setSelectedCourt(e.target.value);
+                setPage(1);
+              }}
               className="bg-slate-50"
             >
               <SelectItem key="ALL">All Courts</SelectItem>
-              <SelectItem key="High Court Allahabad">High Court Allahabad</SelectItem>
-              <SelectItem key="High Court Lucknow">High Court Lucknow</SelectItem>
+              <SelectItem key="HC-ALD">High Court Allahabad</SelectItem>
+              <SelectItem key="HC-LKO">High Court Lucknow</SelectItem>
+              <SelectItem key="SCI">Supreme Court of India</SelectItem>
+              <SelectItem key="SPST">State Tribunal (SPST)</SelectItem>
             </Select>
 
             <Select
@@ -477,12 +620,17 @@ export default function CaseRegisterPage() {
               radius="sm"
               placeholder="Owning Wing / Section"
               selectedKeys={[selectedWing]}
-              onChange={(e) => setSelectedWing(e.target.value)}
+              onChange={(e) => {
+                setSelectedWing(e.target.value);
+                setPage(1);
+              }}
               className="bg-slate-50"
             >
               <SelectItem key="ALL">All Wings</SelectItem>
               <SelectItem key="Recruitment Wing">Recruitment Wing</SelectItem>
               <SelectItem key="Promotion Wing">Promotion Wing</SelectItem>
+              <SelectItem key="Legal Cell">Legal Cell</SelectItem>
+              <SelectItem key="Establishment Wing">Establishment Wing</SelectItem>
             </Select>
 
             <div className="flex gap-2">
@@ -513,19 +661,18 @@ export default function CaseRegisterPage() {
         <CardBody className="p-0">
           <Table
             removeWrapper
-            aria-label="Comprehensive Case Register Table"
+            aria-label="4-Identifier and Connected Writs Register Table"
             className="min-w-full"
             bottomContent={
               <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
                 <span className="text-xs text-slate-500">
-                  Showing {(page - 1) * rowsPerPage + 1} to{" "}
-                  {Math.min(page * rowsPerPage, filteredItems.length)} of {filteredItems.length} records
+                  Showing Page <strong>{page}</strong> of <strong>{totalPages}</strong> (Total <strong>{totalCount}</strong> Records)
                 </span>
                 <Pagination
                   size="sm"
                   isCompact
                   showControls
-                  total={Math.ceil(filteredItems.length / rowsPerPage) || 1}
+                  total={totalPages}
                   page={page}
                   onChange={(newPage) => setPage(newPage)}
                 />
@@ -543,9 +690,20 @@ export default function CaseRegisterPage() {
                 </TableColumn>
               )}
             </TableHeader>
-            <TableBody items={items} emptyContent="No registered cases found matching your filters">
+            <TableBody
+              items={cases}
+              isLoading={loading}
+              loadingContent={
+                <div className="p-4 space-y-2">
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                </div>
+              }
+              emptyContent={!loading ? "No registered dockets found matching active filters." : " "}
+            >
               {(item) => (
-                <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
                   {(columnKey) => <TableCell>{renderCell(item, columnKey)}</TableCell>}
                 </TableRow>
               )}
@@ -554,34 +712,144 @@ export default function CaseRegisterPage() {
         </CardBody>
       </Card>
 
+      {/* MODAL 1: CONNECTED / TAGGED WRITS MANAGER */}
+      <Modal
+        isOpen={isConnectedOpen}
+        onOpenChange={onConnectedOpenChange}
+        size="2xl"
+        scrollBehavior="inside"
+      >
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="flex flex-col gap-1 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-rounded text-blue-700">link</span>
+                  <span className="text-sm font-bold text-slate-900">
+                    Connected / Tagged Writs Registry
+                  </span>
+                </div>
+                <p className="text-xs font-normal text-slate-500">
+                  Leading Docket: <strong className="text-slate-800">{selectedLeadCase?.fileNo}</strong> ·{" "}
+                  <span className="text-blue-700">{selectedLeadCase?.writNumber || "Notice"}</span>
+                </p>
+              </ModalHeader>
+
+              <ModalBody className="space-y-4 py-4 text-xs">
+                <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 text-slate-700">
+                  <p className="font-semibold text-blue-900">Judicial Tagging Notice:</p>
+                  <p className="mt-0.5 text-[11px] text-slate-600">
+                    All connected petitions listed below will automatically share this Lead Docket&apos;s Next Date of Hearing (NDOH) and Court Room assignment.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="font-bold text-slate-800">
+                    Currently Attached Writs ({selectedLeadCase?.connectedWrits?.length || 0})
+                  </h4>
+                  {selectedLeadCase?.connectedWrits && selectedLeadCase.connectedWrits.length > 0 ? (
+                    <div className="mt-2 space-y-2">
+                      {selectedLeadCase.connectedWrits.map((cw, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-2.5"
+                        >
+                          <div>
+                            <span className="font-bold text-[#0f2744]">{cw.writNumber}</span>
+                            <p className="text-[11px] font-medium text-slate-600">
+                              Petitioner: {cw.petitionerName || "--"}
+                            </p>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {cw.taggedDate ? new Date(cw.taggedDate).toLocaleDateString() : ""}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-slate-400 italic">No connected writs attached to this leading case yet.</p>
+                  )}
+                </div>
+
+                {/* Attach New Writ Form */}
+                <div className="rounded-lg border border-dashed border-slate-300 p-3 space-y-2">
+                  <p className="font-bold text-slate-800">Tag a New Writ to this Lead File:</p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Input
+                      size="sm"
+                      label="Connected Writ No."
+                      labelPlacement="outside"
+                      placeholder="e.g. WRIT-A / 4502 / 2026"
+                      value={newTaggedWritNo}
+                      onValueChange={setNewTaggedWritNo}
+                    />
+                    <Input
+                      size="sm"
+                      label="Petitioner Name"
+                      labelPlacement="outside"
+                      placeholder="e.g. Ramesh Chandra & Ors"
+                      value={newTaggedPetitioner}
+                      onValueChange={setNewTaggedPetitioner}
+                    />
+                  </div>
+                  <div className="flex justify-end pt-1">
+                    <Button
+                      size="sm"
+                      radius="sm"
+                      className="bg-[#0f2744] text-xs font-semibold text-white"
+                      isLoading={isAttaching}
+                      onPress={handleAttachWrit}
+                      startContent={!isAttaching && <span className="material-symbols-rounded text-sm">add_link</span>}
+                    >
+                      Attach to Lead Docket
+                    </Button>
+                  </div>
+                </div>
+              </ModalBody>
+
+              <ModalFooter>
+                <Button size="sm" radius="sm" variant="bordered" onPress={onClose}>
+                  Done
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* MODAL 2: LIVE ECOURTS NAPIX SYNC MODAL */}
       <Modal isOpen={isSyncOpen} onOpenChange={onSyncOpenChange} placement="top" size="md">
         <ModalContent>
           {(onClose) => (
             <>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span className="material-symbols-rounded text-blue-700">sync</span>
-                Trigger Live eCourts Sync
+                Trigger Live eCourts NAPIX Sync
               </ModalHeader>
               <ModalBody className="space-y-3 text-xs">
                 <p className="text-slate-600">
-                  You are about to query the official High Court CIS registry via NAPIX for:
+                  Querying the official High Court CIS database via NAPIX gateway for:
                 </p>
                 <div className="rounded-lg bg-slate-50 p-3 border border-slate-200 space-y-1 font-medium">
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Case No:</span>
-                    <span className="font-bold text-slate-800">{activeSyncCase?.caseNoYear}</span>
+                    <span className="text-slate-500">File Docket No:</span>
+                    <span className="font-mono font-bold text-slate-800">{activeSyncCase?.fileNo}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Writ / Case No:</span>
+                    <span className="font-bold text-blue-800">{activeSyncCase?.writNumber || "Awaiting"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Notice No:</span>
+                    <span className="font-mono text-slate-700">{activeSyncCase?.noticeNumber || "--"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">CNR Number:</span>
-                    <span className="font-mono font-bold text-blue-800">{activeSyncCase?.cnrNumber}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Court Bench:</span>
-                    <span className="text-slate-800">{activeSyncCase?.court}</span>
+                    <span className="font-mono font-bold text-emerald-700">{activeSyncCase?.cnrNumber || "None"}</span>
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  This background job pulls updated next hearing dates, judicial business summaries, and newly signed order PDFs.
+                  This background task pulls fresh NDOH dates, bench coram updates, daily court orders, and updates all connected writs sharing this hearing.
                 </p>
               </ModalBody>
               <ModalFooter>
@@ -593,9 +861,9 @@ export default function CaseRegisterPage() {
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
                   isLoading={isSyncing}
-                  onClick={executeSync}
+                  onClick={handleExecuteSync}
                 >
-                  Poll Registry Now
+                  Poll eCourts Now
                 </Button>
               </ModalFooter>
             </>

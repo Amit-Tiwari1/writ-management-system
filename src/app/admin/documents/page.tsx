@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, Suspense } from "react";
+import React, { useState, useMemo, useEffect, useCallback, Suspense, useRef } from "react";
 import {
   Card,
   CardBody,
@@ -23,231 +23,220 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Skeleton,
 } from "@nextui-org/react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import toast from "react-hot-toast";
+
+import { DmsAPI, ICaseDocumentItem } from "@/api/dmsApi";
+import { CasesAPI, CaseItem } from "@/api/casesApi";
+
+type FolderCategoryKey =
+  | "01_petitions"
+  | "02_notings"
+  | "03_counter_affidavits"
+  | "04_orders"
+  | "05_compliance_proofs";
+
+const FOLDER_CATEGORIES: Array<{ key: FolderCategoryKey; label: string; icon: string }> = [
+  { key: "01_petitions", label: "01 Petitions & Annexures", icon: "description" },
+  { key: "02_notings", label: "02 Internal Notings & PWC", icon: "edit_note" },
+  { key: "03_counter_affidavits", label: "03 Counter Affidavits Filed", icon: "verified" },
+  { key: "04_orders", label: "04 Court Orders & Judgments", icon: "gavel" },
+  { key: "05_compliance_proofs", label: "05 Compliance Proofs", icon: "task_alt" },
+];
 
 function DocumentDMSContent() {
   const searchParams = useSearchParams();
   const queryCaseId = searchParams.get("caseId");
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const { isOpen: isUploadOpen, onOpen: onUploadOpen, onOpenChange: onUploadOpenChange } = useDisclosure();
   const { isOpen: isFullScreenOpen, onOpen: onFullScreenOpen, onOpenChange: onFullScreenOpenChange } = useDisclosure();
   const { isOpen: isAnnotateOpen, onOpen: onAnnotateOpen, onOpenChange: onAnnotateOpenChange } = useDisclosure();
 
-  // Master case directory mapping
-  const casesDB: Record<string, { label: string; caseNoYear: string; cnr: string; petitioner: string; court: string }> = {
-    "1": {
-      label: "WRIT-A / 4012 / 2026 — Abhay Gupta (High Court Allahabad)",
-      caseNoYear: "WRIT-A / 4012 / 2026",
-      cnr: "UPHC010029312026",
-      petitioner: "Abhay Gupta & 4 Others",
-      court: "High Court Allahabad (Principal Bench)",
-    },
-    "2": {
-      label: "WRIT-A / 4021 / 2026 — Vikas Kumar Yadav (High Court Lucknow)",
-      caseNoYear: "WRIT-A / 4021 / 2026",
-      cnr: "UPHC020011402026",
-      petitioner: "Vikas Kumar Yadav",
-      court: "High Court Lucknow Bench",
-    },
-    "3": {
-      label: "WRIT-A / 7100 / 2025 — Rohit Kumar (High Court Allahabad)",
-      caseNoYear: "WRIT-A / 7100 / 2025",
-      cnr: "UPHC010089212025",
-      petitioner: "Rohit Kumar",
-      court: "High Court Allahabad (Bench 12)",
-    },
-    "4": {
-      label: "WRIT-A / 2025 / 19 — Sujit Yadav (High Court Allahabad)",
-      caseNoYear: "WRIT-A / 2025 / 19",
-      cnr: "UPHC010041122025",
-      petitioner: "Sujit Yadav",
-      court: "High Court Allahabad (Bench 34)",
-    },
-  };
+  // State: Case Selection
+  const [casesList, setCasesList] = useState<CaseItem[]>([]);
+  const [selectedCaseId, setSelectedCaseId] = useState<string>("");
+  const [loadingCases, setLoadingCases] = useState<boolean>(true);
 
-  const [selectedCaseKey, setSelectedCaseKey] = useState<string>("1");
-  const [activeFolder, setActiveFolder] = useState<string>("01_petitions");
+  // State: 5-Tier Folders
+  const [activeFolder, setActiveFolder] = useState<FolderCategoryKey>("01_petitions");
+  const [foldersData, setFoldersData] = useState<Record<FolderCategoryKey, ICaseDocumentItem[]>>({
+    "01_petitions": [],
+    "02_notings": [],
+    "03_counter_affidavits": [],
+    "04_orders": [],
+    "05_compliance_proofs": [],
+  });
+  const [loadingDocs, setLoadingDocs] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  // Sync with URL query parameter (?caseId=...)
+  // Preview Document
+  const [previewDoc, setPreviewDoc] = useState<ICaseDocumentItem | null>(null);
+
+  // Upload Modal State
+  const [uploadFolder, setUploadFolder] = useState<FolderCategoryKey>("01_petitions");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+
+  // Annotation Modal State
+  const [annotationNote, setAnnotationNote] = useState<string>("");
+  const [annotationPage, setAnnotationPage] = useState<number>(1);
+  const [isAnnotating, setIsAnnotating] = useState<boolean>(false);
+
+  // 1. Load Live Cases from Backend
   useEffect(() => {
-    if (queryCaseId && casesDB[queryCaseId]) {
-      setSelectedCaseKey(queryCaseId);
+    async function loadCases() {
+      setLoadingCases(true);
+      try {
+        const res = await CasesAPI.getCases({ limit: 100 });
+        if (res?.success && Array.isArray(res.data)) {
+          setCasesList(res.data);
+          if (res.data.length > 0) {
+            const initialId = queryCaseId && res.data.some((c) => c._id === queryCaseId)
+              ? queryCaseId
+              : res.data[0]._id;
+            setSelectedCaseId(initialId);
+          }
+        }
+      } catch (err: any) {
+        console.error("Failed to load cases:", err);
+        toast.error("Failed to load case matters");
+      } finally {
+        setLoadingCases(false);
+      }
     }
+    loadCases();
   }, [queryCaseId]);
 
-  const activeCase = useMemo(() => {
-    return casesDB[selectedCaseKey] || casesDB["1"];
-  }, [selectedCaseKey]);
-
-  // Standard 5-tier E-file directory folders
-  const folderCategories = [
-    { key: "01_petitions", label: "01 Petitions & Annexures", icon: "description" },
-    { key: "02_notings", label: "02 Internal Notings & PWC", icon: "edit_note" },
-    { key: "03_counters", label: "03 Counter Affidavits Filed", icon: "verified" },
-    { key: "04_orders", label: "04 Court Orders & Judgments", icon: "gavel" },
-    { key: "05_compliance", label: "05 Compliance Proofs", icon: "task_alt" },
-  ];
-
-  // Case-specific file repository
-  const [caseFilesRepository, setCaseFilesRepository] = useState<Record<string, Record<string, any[]>>>({
-    "1": {
-      "01_petitions": [
-        { id: "f1-1", name: "Original_Writ_Petition_Filed_4012_2026.pdf", size: "4.2 MB", version: "v1.0", date: "15 Sep 2026", hash: "sha256:9f83ab...419c", status: "VERIFIED" },
-        { id: "f1-2", name: "Annexure_P1_Exam_Admit_Card.pdf", size: "1.1 MB", version: "v1.0", date: "15 Sep 2026", hash: "sha256:3e41dd...009a", status: "VERIFIED" },
-        { id: "f1-3", name: "CSC_Advance_Notice_Copy.pdf", size: "890 KB", version: "v1.0", date: "16 Sep 2026", hash: "sha256:aa8912...77ff", status: "VERIFIED" },
-      ],
-      "02_notings": [
-        { id: "f1-4", name: "PWC_Draft_Comments_SP_Legal.pdf", size: "750 KB", version: "v2.1", date: "16 Sep 2026", hash: "sha256:1199ab...bc34", status: "VERIFIED" },
-        { id: "f1-5", name: "Secretary_Approval_Minutes.pdf", size: "540 KB", version: "v1.0", date: "16 Sep 2026", hash: "sha256:ff7722...11aa", status: "VERIFIED" },
-      ],
-      "03_counters": [
-        { id: "f1-6", name: "Counter_Affidavit_Draft_v1.pdf", size: "2.1 MB", version: "v1.0", date: "16 Sep 2026", hash: "sha256:cc3344...8899", status: "DRAFT" },
-        { id: "f1-7", name: "Final_Sworn_Counter_Affidavit_High_Court.pdf", size: "3.5 MB", version: "v2.0", date: "16 Sep 2026", hash: "sha256:88aa11...5566", status: "VERIFIED" },
-      ],
-      "04_orders": [
-        { id: "f1-8", name: "Interim_Order_Dated_12_Sep_2026_High_Court.pdf", size: "1.4 MB", version: "v1.0", date: "13 Sep 2026", hash: "sha256:55ee11...99bb", status: "API_SYNCED" },
-        { id: "f1-9", name: "Notice_Listing_Order_Bench_34.pdf", size: "980 KB", version: "v1.0", date: "15 Sep 2026", hash: "sha256:77aa33...44cc", status: "API_SYNCED" },
-      ],
-      "05_compliance": [
-        { id: "f1-10", name: "Compliance_Affidavit_Decision_Copy.pdf", size: "1.8 MB", version: "v1.0", date: "16 Sep 2026", hash: "sha256:22ff44...66aa", status: "VERIFIED" },
-      ],
-    },
-    "2": {
-      "01_petitions": [
-        { id: "f2-1", name: "Writ_Petition_4021_2026_Vikas_Yadav.pdf", size: "3.8 MB", version: "v1.0", date: "20 Aug 2026", hash: "sha256:55ab77...9921", status: "VERIFIED" },
-      ],
-      "02_notings": [
-        { id: "f2-2", name: "CMO_Medical_Board_Report_Noting.pdf", size: "920 KB", version: "v1.0", date: "28 Aug 2026", hash: "sha256:66cc11...00aa", status: "VERIFIED" },
-      ],
-      "03_counters": [
-        { id: "f2-3", name: "Counter_Affidavit_Filed_By_State.pdf", size: "2.9 MB", version: "v1.0", date: "05 Sep 2026", hash: "sha256:bb7711...33ee", status: "VERIFIED" },
-      ],
-      "04_orders": [
-        { id: "f2-4", name: "High_Court_Lucknow_Notice_Order.pdf", size: "1.2 MB", version: "v1.0", date: "22 Aug 2026", hash: "sha256:11ff33...88bb", status: "API_SYNCED" },
-      ],
-      "05_compliance": [],
-    },
-    "3": {
-      "01_petitions": [
-        { id: "f3-1", name: "Stay_Writ_Petition_7100_2025.pdf", size: "5.1 MB", version: "v1.0", date: "10 Jul 2025", hash: "sha256:77dd22...11ff", status: "VERIFIED" },
-      ],
-      "02_notings": [
-        { id: "f3-2", name: "Vacation_of_Stay_Legal_Comments.pdf", size: "1.1 MB", version: "v1.0", date: "14 Aug 2026", hash: "sha256:99bb44...66cc", status: "VERIFIED" },
-      ],
-      "03_counters": [],
-      "04_orders": [
-        { id: "f3-3", name: "Interim_Stay_Order_Dated_12_Aug_2026.pdf", size: "2.2 MB", version: "v1.0", date: "12 Aug 2026", hash: "sha256:aa2288...44dd", status: "API_SYNCED" },
-      ],
-      "05_compliance": [],
-    },
-    "4": {
-      "01_petitions": [
-        { id: "f4-1", name: "Writ_Petition_2025_19_Sujit_Yadav.pdf", size: "2.4 MB", version: "v1.0", date: "15 Jan 2025", hash: "sha256:33ee99...11cc", status: "VERIFIED" },
-      ],
-      "02_notings": [
-        { id: "f4-2", name: "Appointment_Order_Notings.pdf", size: "620 KB", version: "v1.0", date: "10 Aug 2026", hash: "sha256:88aa22...55ee", status: "VERIFIED" },
-      ],
-      "03_counters": [
-        { id: "f4-3", name: "Sworn_Compliance_Affidavit_HC.pdf", size: "1.9 MB", version: "v1.0", date: "20 Aug 2026", hash: "sha256:44bb11...99aa", status: "VERIFIED" },
-      ],
-      "04_orders": [
-        { id: "f4-4", name: "Final_Disposal_Judgment_Order.pdf", size: "1.5 MB", version: "v1.0", date: "02 Aug 2026", hash: "sha256:00ff66...22dd", status: "API_SYNCED" },
-      ],
-      "05_compliance": [
-        { id: "f4-5", name: "Sub_Inspector_Appointment_Letter_Copy.pdf", size: "840 KB", version: "v1.0", date: "25 Aug 2026", hash: "sha256:77cc33...88bb", status: "VERIFIED" },
-      ],
-    },
-  });
-
-  // Current preview document
-  const [previewDoc, setPreviewDoc] = useState<any>({
-    title: "Original_Writ_Petition_Filed_4012_2026.pdf",
-    folder: "01 Petitions & Annexures",
-    size: "4.2 MB",
-    hash: "sha256:9f83ab...419c",
-    uploadedBy: "Registry Office (CSC Inward)",
-    uploadedAt: "15 Sep 2026, 11:20 AM",
-  });
-
-  // Keep preview synced when switching case or folder
-  useEffect(() => {
-    const currentList = caseFilesRepository[selectedCaseKey]?.[activeFolder] || [];
-    if (currentList.length > 0) {
-      setPreviewDoc({
-        title: currentList[0].name,
-        folder: folderCategories.find((c) => c.key === activeFolder)?.label,
-        size: currentList[0].size,
-        hash: currentList[0].hash,
-        uploadedBy: "Registry Officer / High Court API",
-        uploadedAt: `${currentList[0].date} 11:00 AM`,
-      });
+  // 2. Fetch Live Documents when Selected Case changes
+  const fetchCaseDocuments = useCallback(async (caseId: string) => {
+    if (!caseId) return;
+    setLoadingDocs(true);
+    try {
+      const res = await DmsAPI.getCaseDocuments(caseId);
+      if (res?.success && res.data) {
+        setFoldersData(res.data);
+        const currentList = res.data[activeFolder] || [];
+        const firstFile = currentList[0] || Object.values(res.data).flat()[0] || null;
+        setPreviewDoc(firstFile);
+      }
+    } catch (err: any) {
+      console.error("Failed to load case documents:", err);
+      toast.error(err.response?.data?.message || "Failed to load documents ledger");
+    } finally {
+      setLoadingDocs(false);
     }
-  }, [selectedCaseKey, activeFolder, caseFilesRepository]);
+  }, [activeFolder]);
 
-  // Upload modal state
-  const [newUploadName, setNewUploadName] = useState("");
-  const [newUploadFolder, setNewUploadFolder] = useState("01_petitions");
+  useEffect(() => {
+    if (selectedCaseId) {
+      fetchCaseDocuments(selectedCaseId);
+    }
+  }, [selectedCaseId, fetchCaseDocuments]);
 
-  // Marginal Annotation state
-  const [annotationNote, setAnnotationNote] = useState("");
-  const [annotationPara, setAnnotationPara] = useState("Para 14 (Grounds of Challenge)");
+  // Current Selected Case Metadata
+  const activeCase = useMemo(() => {
+    return casesList.find((c) => c._id === selectedCaseId);
+  }, [casesList, selectedCaseId]);
 
-  const handleUploadSubmit = () => {
-    if (!newUploadName) return;
-    const newDoc = {
-      id: `f-${Date.now()}`,
-      name: newUploadName.endsWith(".pdf") ? newUploadName : `${newUploadName}.pdf`,
-      size: "1.6 MB",
-      version: "v1.0",
-      date: "Today",
-      hash: "sha256:22bb99...77aa",
-      status: "VERIFIED",
-    };
+  const caseSelectItems = useMemo(() => {
+    return casesList.map((c) => ({
+      key: c._id,
+      label: `${c.fileNo} · ${c.writNumber || "Notice"} — ${c.leadPetitioner}`,
+    }));
+  }, [casesList]);
 
-    setCaseFilesRepository((prev) => {
-      const currentCase = prev[selectedCaseKey] || {};
-      const currentFolderFiles = currentCase[newUploadFolder] || [];
-      return {
-        ...prev,
-        [selectedCaseKey]: {
-          ...currentCase,
-          [newUploadFolder]: [newDoc, ...currentFolderFiles],
-        },
-      };
-    });
-
-    setPreviewDoc({
-      title: newDoc.name,
-      folder: folderCategories.find((c) => c.key === newUploadFolder)?.label,
-      size: newDoc.size,
-      hash: newDoc.hash,
-      uploadedBy: "V. Sharma (Legal Cell Desk)",
-      uploadedAt: "Just now",
-    });
-
-    setNewUploadName("");
-    onUploadOpenChange();
-  };
-
-  const handleSaveAnnotation = () => {
-    if (!annotationNote.trim()) return;
-    alert(`Marginal Note recorded on ${annotationPara}! This comment is now available in 4.0 Green Sheet Notings.`);
-    setAnnotationNote("");
-    onAnnotateOpenChange();
-  };
-
-  const handleDownloadFile = (fileName: string) => {
-    alert(`Initiating secure direct download from MinIO S3 for: ${fileName}`);
-  };
-
+  // Current Folder Files filtered by Search
   const currentFiles = useMemo(() => {
-    const list = caseFilesRepository[selectedCaseKey]?.[activeFolder] || [];
-    if (!searchQuery) return list;
-    return list.filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
-  }, [caseFilesRepository, selectedCaseKey, activeFolder, searchQuery]);
+    const list = foldersData[activeFolder] || [];
+    if (!searchQuery.trim()) return list;
+    const q = searchQuery.toLowerCase().trim();
+    return list.filter(
+      (f) =>
+        f.fileName.toLowerCase().includes(q) ||
+        f.originalName.toLowerCase().includes(q) ||
+        (f.ocrTextContent && f.ocrTextContent.toLowerCase().includes(q))
+    );
+  }, [foldersData, activeFolder, searchQuery]);
+
+  // 3. Handle File Upload
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+    }
+  };
+
+  const handleUploadSubmit = async () => {
+    if (!selectedFile) {
+      toast.error("Please select a file to upload.");
+      return;
+    }
+    if (!selectedCaseId) {
+      toast.error("No active case docket selected.");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("folderCategory", uploadFolder);
+
+      const res = await DmsAPI.uploadDocument(selectedCaseId, formData);
+      if (res?.success) {
+        toast.success(`Document "${selectedFile.name}" archived to S3!`, { icon: "🔒" });
+        setSelectedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        onUploadOpenChange();
+        fetchCaseDocuments(selectedCaseId);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Upload failed. Verify storage config.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // 4. Handle Save Marginal Annotation
+  const handleSaveAnnotation = async () => {
+    if (!annotationNote.trim() || !previewDoc) return;
+    setIsAnnotating(true);
+    try {
+      const res = await DmsAPI.addAnnotation(previewDoc._id, {
+        pageNumber: Number(annotationPage) || 1,
+        comment: annotationNote.trim(),
+      });
+      if (res?.success) {
+        toast.success("Marginal annotation encrypted and linked to Green Sheet!", { icon: "✍️" });
+        setAnnotationNote("");
+        onAnnotateOpenChange();
+        fetchCaseDocuments(selectedCaseId);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to pin annotation");
+    } finally {
+      setIsAnnotating(false);
+    }
+  };
+
+  // Format Helper for file size
+  const formatFileSize = (bytes: number) => {
+    if (!bytes) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+  };
+
+  // Safe PDF URL resolver
+  const getPdfUrl = (url?: string) => {
+    if (!url) return "";
+    return url;
+  };
 
   return (
     <div className="space-y-4">
@@ -268,12 +257,14 @@ function DocumentDMSContent() {
                 </Chip>
               </div>
               <p className="mt-1 text-xs text-slate-500 ml-9">
-                Viewing Digital Dossier for: <b className="text-slate-900">{activeCase.caseNoYear}</b> ({activeCase.cnr}) · {activeCase.court}
+                Viewing Digital Dossier for: <b className="text-slate-900">{activeCase?.fileNo || "--"}</b> ·{" "}
+                <span className="text-blue-700 font-semibold">{activeCase?.writNumber || "Advance Notice"}</span> ·{" "}
+                {activeCase?.court || "--"}
               </p>
             </div>
 
             <div className="flex items-center gap-2">
-              <Link href={`/admin/cases/${selectedCaseKey}`}>
+              <Link href={`/admin/cases/${selectedCaseId}`}>
                 <Button
                   size="sm"
                   variant="bordered"
@@ -303,13 +294,13 @@ function DocumentDMSContent() {
               radius="sm"
               label="Select Case Matter E-File"
               labelPlacement="outside"
-              selectedKeys={[selectedCaseKey]}
-              onChange={(e) => setSelectedCaseKey(e.target.value)}
+              items={caseSelectItems}
+              selectedKeys={selectedCaseId ? [selectedCaseId] : []}
+              onChange={(e) => setSelectedCaseId(e.target.value)}
+              isLoading={loadingCases}
               className="bg-slate-50 font-semibold"
             >
-              {Object.entries(casesDB).map(([k, val]) => (
-                <SelectItem key={k}>{val.label}</SelectItem>
-              ))}
+              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
             </Select>
 
             <Input
@@ -329,8 +320,8 @@ function DocumentDMSContent() {
 
       {/* 2. 5-Folder Directory Tabs */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-        {folderCategories.map((f) => {
-          const count = caseFilesRepository[selectedCaseKey]?.[f.key]?.length || 0;
+        {FOLDER_CATEGORIES.map((f) => {
+          const count = foldersData[f.key]?.length || 0;
           const isSelected = activeFolder === f.key;
           return (
             <div
@@ -363,7 +354,7 @@ function DocumentDMSContent() {
           <div className="flex items-center justify-between border-b border-slate-100 p-4">
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Directory: {folderCategories.find((c) => c.key === activeFolder)?.label}
+                Directory: {FOLDER_CATEGORIES.find((c) => c.key === activeFolder)?.label}
               </h3>
               <p className="text-[11px] text-slate-400">Tamper-proof encrypted S3 storage ledger</p>
             </div>
@@ -373,47 +364,62 @@ function DocumentDMSContent() {
           <CardBody className="p-0">
             <Table removeWrapper aria-label="Case documents table" className="min-w-full">
               <TableHeader>
-                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">FILE NAME</TableColumn>
-                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">VERSION</TableColumn>
-                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">SIZE</TableColumn>
-                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">STATUS</TableColumn>
-                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  FILE NAME
+                </TableColumn>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  VERSION
+                </TableColumn>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  SIZE
+                </TableColumn>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  STATUS
+                </TableColumn>
+                <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
+                  ACTION
+                </TableColumn>
               </TableHeader>
-              <TableBody items={currentFiles} emptyContent="No documents uploaded in this folder tier yet.">
-                {(item: any) => (
+              <TableBody
+                items={currentFiles}
+                isLoading={loadingDocs}
+                loadingContent={
+                  <div className="p-4 space-y-2">
+                    <Skeleton className="h-6 w-full rounded" />
+                    <Skeleton className="h-6 w-full rounded" />
+                  </div>
+                }
+                emptyContent={!loadingDocs ? "No documents uploaded in this folder tier yet." : " "}
+              >
+                {(item: ICaseDocumentItem) => (
                   <TableRow
-                    key={item.id}
-                    className="border-b border-slate-100 hover:bg-slate-50/70 cursor-pointer"
-                    onClick={() =>
-                      setPreviewDoc({
-                        title: item.name,
-                        folder: folderCategories.find((c) => c.key === activeFolder)?.label,
-                        size: item.size,
-                        hash: item.hash,
-                        uploadedBy: "Registry Officer / API",
-                        uploadedAt: `${item.date} 10:30 AM`,
-                      })
-                    }
+                    key={item._id}
+                    className={`border-b border-slate-100 hover:bg-slate-50/70 cursor-pointer ${
+                      previewDoc?._id === item._id ? "bg-blue-50/40" : ""
+                    }`}
+                    onClick={() => setPreviewDoc(item)}
                   >
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <span className="material-symbols-rounded text-lg text-rose-500">picture_as_pdf</span>
                         <div className="max-w-[230px]">
-                          <p className="truncate text-xs font-bold text-slate-800">{item.name}</p>
-                          <p className="font-mono text-[10px] text-slate-400">{item.hash}</p>
+                          <p className="truncate text-xs font-bold text-slate-800">{item.fileName}</p>
+                          <p className="font-mono text-[10px] text-slate-400 truncate">
+                            {item.sha256Hash ? `sha256:${item.sha256Hash.slice(0, 12)}...` : "--"}
+                          </p>
                         </div>
                       </div>
                     </TableCell>
                     <TableCell className="text-xs font-semibold text-slate-700">{item.version}</TableCell>
-                    <TableCell className="text-xs text-slate-500">{item.size}</TableCell>
+                    <TableCell className="text-xs text-slate-500">{formatFileSize(item.fileSize)}</TableCell>
                     <TableCell>
                       <Chip
                         size="sm"
                         variant="flat"
-                        color={item.status === "API_SYNCED" ? "secondary" : item.status === "VERIFIED" ? "success" : "warning"}
+                        color={item.isVerifiedCopy ? "success" : "warning"}
                         className="text-[9px] font-bold"
                       >
-                        {item.status}
+                        {item.isVerifiedCopy ? "VERIFIED" : "DRAFT"}
                       </Chip>
                     </TableCell>
                     <TableCell className="text-center">
@@ -426,20 +432,13 @@ function DocumentDMSContent() {
                             className="text-slate-500"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setPreviewDoc({
-                                title: item.name,
-                                folder: folderCategories.find((c) => c.key === activeFolder)?.label,
-                                size: item.size,
-                                hash: item.hash,
-                                uploadedBy: "Registry Officer / API",
-                                uploadedAt: `${item.date} 10:30 AM`,
-                              });
+                              setPreviewDoc(item);
                             }}
                           >
                             <span className="material-symbols-rounded text-sm">visibility</span>
                           </Button>
                         </Tooltip>
-                        <Tooltip content="Download Copy">
+                        <Tooltip content="Open In New Window">
                           <Button
                             isIconOnly
                             size="sm"
@@ -447,10 +446,14 @@ function DocumentDMSContent() {
                             className="text-slate-500 hover:text-blue-700"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDownloadFile(item.name);
+                              if (item.s3Bucket) {
+                                window.open(item.s3Bucket, "_blank");
+                              } else {
+                                toast.error("File download link unavailable");
+                              }
                             }}
                           >
-                            <span className="material-symbols-rounded text-sm">download</span>
+                            <span className="material-symbols-rounded text-sm">open_in_new</span>
                           </Button>
                         </Tooltip>
                       </div>
@@ -467,59 +470,76 @@ function DocumentDMSContent() {
           <div className="flex items-center justify-between border-b border-slate-100 p-4">
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Split-Screen In-App Viewer</h3>
-              <p className="truncate text-xs font-bold text-slate-900 max-w-[240px]">{previewDoc.title}</p>
+              <p className="truncate text-xs font-bold text-slate-900 max-w-[240px]">
+                {previewDoc?.fileName || "Select a document to preview"}
+              </p>
             </div>
-            <Chip size="sm" color="success" variant="flat" className="text-[10px] font-bold">
-              Verified Copy
-            </Chip>
+            {previewDoc && (
+              <Chip size="sm" color="success" variant="flat" className="text-[10px] font-bold">
+                {previewDoc.isVerifiedCopy ? "Verified Copy" : "Draft"}
+              </Chip>
+            )}
           </div>
 
           <CardBody className="p-4 space-y-3">
-            {/* Metadata Bar */}
-            <div className="rounded-lg bg-slate-50 p-3 text-xs space-y-1 border border-slate-200/60">
-              <div className="flex justify-between text-slate-500">
-                <span>Folder Tier:</span>
-                <span className="font-semibold text-slate-800">{previewDoc.folder}</span>
-              </div>
-              <div className="flex justify-between text-slate-500">
-                <span>File Size:</span>
-                <span className="font-semibold text-slate-800">{previewDoc.size}</span>
-              </div>
-              <div className="flex justify-between text-slate-500">
-                <span>SHA-256 Hash:</span>
-                <span className="font-mono text-[10px] font-bold text-slate-700">{previewDoc.hash}</span>
-              </div>
-            </div>
+            {previewDoc ? (
+              <>
+                {/* Metadata Bar */}
+                <div className="rounded-lg bg-slate-50 p-3 text-xs space-y-1 border border-slate-200/60">
+                  <div className="flex justify-between text-slate-500">
+                    <span>Folder Tier:</span>
+                    <span className="font-semibold text-slate-800">{previewDoc.folderCategory}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500">
+                    <span>File Size:</span>
+                    <span className="font-semibold text-slate-800">{formatFileSize(previewDoc.fileSize)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-500">
+                    <span>SHA-256 Hash:</span>
+                    <span className="font-mono text-[10px] font-bold text-slate-700 truncate max-w-[200px]">
+                      {previewDoc.sha256Hash}
+                    </span>
+                  </div>
+                </div>
 
-            {/* Document Canvas Preview */}
-            <div className="flex h-[360px] flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-100/50 p-6 text-center">
-              <span className="material-symbols-rounded text-5xl text-rose-500">picture_as_pdf</span>
-              <p className="mt-2 text-xs font-bold text-slate-800 truncate max-w-[280px]">{previewDoc.title}</p>
-              <p className="text-[11px] text-slate-400 mt-1 max-w-[280px]">
-                High Court Certified Web Copy with Digital Timestamp & Coram Signature.
-              </p>
-              <div className="mt-4 flex gap-2">
-                <Button
-                  size="sm"
-                  radius="sm"
-                  className="bg-[#0f2744] text-xs font-semibold text-white hover:bg-[#163a66]"
-                  startContent={<span className="material-symbols-rounded text-sm">fullscreen</span>}
-                  onClick={onFullScreenOpen}
-                >
-                  Full Screen
-                </Button>
-                <Button
-                  size="sm"
-                  radius="sm"
-                  variant="bordered"
-                  className="border-slate-300 text-xs font-semibold hover:border-slate-400"
-                  startContent={<span className="material-symbols-rounded text-sm">draw</span>}
-                  onClick={onAnnotateOpen}
-                >
-                  Annotate Margin
-                </Button>
+                {/* Document Canvas Preview */}
+                <div className="flex h-[360px] flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-100/50 p-6 text-center">
+                  <span className="material-symbols-rounded text-5xl text-rose-500">picture_as_pdf</span>
+                  <p className="mt-2 text-xs font-bold text-slate-800 truncate max-w-[280px]">
+                    {previewDoc.fileName}
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-1 max-w-[280px]">
+                    Uploaded by {previewDoc.uploadedBy} on {new Date(previewDoc.createdAt).toLocaleDateString()}
+                  </p>
+                  <div className="mt-4 flex gap-2">
+                    <Button
+                      size="sm"
+                      radius="sm"
+                      className="bg-[#0f2744] text-xs font-semibold text-white hover:bg-[#163a66]"
+                      startContent={<span className="material-symbols-rounded text-sm">fullscreen</span>}
+                      onClick={onFullScreenOpen}
+                    >
+                      Full Screen
+                    </Button>
+                    <Button
+                      size="sm"
+                      radius="sm"
+                      variant="bordered"
+                      className="border-slate-300 text-xs font-semibold hover:border-slate-400"
+                      startContent={<span className="material-symbols-rounded text-sm">draw</span>}
+                      onClick={onAnnotateOpen}
+                    >
+                      Annotate Margin ({previewDoc.annotations?.length || 0})
+                    </Button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex h-[420px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400">
+                <span className="material-symbols-rounded text-4xl text-slate-300 mb-2">folder_open</span>
+                No document selected. Click any document on the left panel to preview.
               </div>
-            </div>
+            )}
           </CardBody>
         </Card>
       </div>
@@ -538,42 +558,50 @@ function DocumentDMSContent() {
                   size="sm"
                   label="Select Folder Tier"
                   labelPlacement="outside"
-                  selectedKeys={[newUploadFolder]}
-                  onChange={(e) => setNewUploadFolder(e.target.value)}
+                  items={FOLDER_CATEGORIES}
+                  selectedKeys={[uploadFolder]}
+                  onChange={(e) => setUploadFolder(e.target.value as FolderCategoryKey)}
                   isRequired
                 >
-                  {folderCategories.map((c) => (
-                    <SelectItem key={c.key}>{c.label}</SelectItem>
-                  ))}
+                  {(c) => <SelectItem key={c.key}>{c.label}</SelectItem>}
                 </Select>
 
-                <Input
-                  size="sm"
-                  label="Document Title / Name"
-                  labelPlacement="outside"
-                  placeholder="e.g. Sworn_Counter_Affidavit_Final.pdf"
-                  value={newUploadName}
-                  onValueChange={setNewUploadName}
-                  isRequired
-                />
-
-                <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 p-6 text-center hover:bg-slate-50/50 cursor-pointer">
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 p-6 text-center hover:bg-slate-50/50 cursor-pointer transition-colors"
+                >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept="application/pdf"
+                    className="hidden"
+                  />
                   <span className="material-symbols-rounded text-3xl text-slate-400">cloud_upload</span>
-                  <p className="mt-2 text-xs font-bold text-slate-800">Drop PDF here to upload</p>
-                  <p className="text-[10px] text-slate-400">Automatic cryptographic SHA-256 hash generation</p>
+                  {selectedFile ? (
+                    <div className="mt-2 text-xs font-bold text-blue-700">
+                      ✓ {selectedFile.name} ({formatFileSize(selectedFile.size)})
+                    </div>
+                  ) : (
+                    <>
+                      <p className="mt-2 text-xs font-bold text-slate-800">Click to select PDF Document</p>
+                      <p className="text-[10px] text-slate-400">Automatic cryptographic SHA-256 seal generation</p>
+                    </>
+                  )}
                 </div>
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isUploading}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  isLoading={isUploading}
                   onClick={handleUploadSubmit}
                 >
-                  Save & Ingest
+                  Upload & Audit
                 </Button>
               </ModalFooter>
             </>
@@ -581,78 +609,81 @@ function DocumentDMSContent() {
         </ModalContent>
       </Modal>
 
-      {/* 2. Full Screen Document Viewer Modal */}
+      {/* 2. Full Screen Document Viewer Modal (FIXED EMBED) */}
       <Modal isOpen={isFullScreenOpen} onOpenChange={onFullScreenOpenChange} placement="center" size="5xl">
-        <ModalContent className="max-h-[90vh]">
-          {(onClose) => (
-            <>
-              <ModalHeader className="border-b border-slate-100 flex items-center justify-between py-3">
-                <div className="flex items-center gap-2">
-                  <span className="material-symbols-rounded text-rose-500">picture_as_pdf</span>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">{previewDoc.title}</h3>
-                    <p className="text-[10px] text-slate-400">{previewDoc.folder} · {previewDoc.size} · {previewDoc.hash}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 mr-6">
-                  <Button
-                    size="sm"
-                    variant="bordered"
-                    radius="sm"
-                    className="text-xs h-7"
-                    startContent={<span className="material-symbols-rounded text-sm">download</span>}
-                    onClick={() => handleDownloadFile(previewDoc.title)}
-                  >
-                    Download
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="bordered"
-                    radius="sm"
-                    className="text-xs h-7"
-                    startContent={<span className="material-symbols-rounded text-sm">print</span>}
-                    onClick={() => window.print()}
-                  >
-                    Print
-                  </Button>
-                </div>
-              </ModalHeader>
-              <ModalBody className="p-4 overflow-y-auto">
-                <div className="bg-slate-800 rounded-lg p-6 min-h-[500px] flex flex-col items-center justify-center text-white">
-                  <div className="bg-white text-slate-900 w-full max-w-2xl min-h-[460px] p-8 rounded shadow-lg text-xs leading-relaxed space-y-4 font-serif">
-                    <div className="text-center border-b pb-3 border-slate-200">
-                      <p className="font-bold text-sm tracking-wide uppercase">In the High Court of Judicature at Allahabad</p>
-                      <p className="text-[11px] text-slate-500">Civil Miscellaneous Writ Petition No. 4012 of 2026</p>
-                    </div>
-                    <div className="flex justify-between text-[11px] font-sans font-semibold text-slate-700">
-                      <span>Abhay Gupta & Others ... Petitioners</span>
-                      <span>Versus</span>
-                      <span>State of U.P. & Others ... Respondents</span>
-                    </div>
-                    <div className="space-y-3 pt-2 text-justify">
-                      <p>
-                        <b>1.</b> That the present petition under Article 226 of the Constitution of India is preferred challenging the impugned administrative rejection communication dated 10-02-2025.
-                      </p>
-                      <p>
-                        <b>2.</b> That the petitioner was a bona fide aspirant and claimed appointment under the statutory Dying-in-Harness Rules upon the demise of his father who was serving as Head Constable in UP Police.
-                      </p>
-                      <p className="bg-amber-50 p-2 border-l-2 border-amber-500 font-sans text-[11px] text-amber-900">
-                        [Annotated Paragraph]: Board counsel directed to submit certified roster copy by NDOH.
-                      </p>
-                      <p>
-                        <b>3.</b> Hon&apos;ble Court pleases to grant four weeks time to Standing Counsel to file counter affidavit. Rejoinder, if any, within two weeks thereafter. List on date fixed.
+        <ModalContent className="max-h-[92vh]">
+          {(onClose) => {
+            const pdfSrc = previewDoc?.s3Bucket || "";
+            // Google Docs Viewer acts as universal proxy for PDFs on cloud storages
+            const viewerUrl = `https://docs.google.com/gview?url=${encodeURIComponent(pdfSrc)}&embedded=true`;
+
+            return (
+              <>
+                <ModalHeader className="border-b border-slate-100 flex items-center justify-between py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-rounded text-rose-500">picture_as_pdf</span>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">{previewDoc?.fileName}</h3>
+                      <p className="text-[10px] text-slate-400">
+                        {previewDoc?.folderCategory} · {previewDoc ? formatFileSize(previewDoc.fileSize) : "--"}
                       </p>
                     </div>
                   </div>
-                </div>
-              </ModalBody>
-              <ModalFooter className="border-t border-slate-100 py-2">
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
-                  Close Viewer
-                </Button>
-              </ModalFooter>
-            </>
-          )}
+                  <div className="flex items-center gap-2 mr-6">
+                    <Button
+                      size="sm"
+                      variant="bordered"
+                      radius="sm"
+                      className="text-xs h-7 border-slate-200"
+                      startContent={<span className="material-symbols-rounded text-sm">open_in_new</span>}
+                      onClick={() => {
+                        if (pdfSrc) window.open(pdfSrc, "_blank");
+                      }}
+                    >
+                      Open in New Tab
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="bordered"
+                      radius="sm"
+                      className="text-xs h-7 border-slate-200"
+                      startContent={<span className="material-symbols-rounded text-sm">download</span>}
+                      onClick={() => {
+                        if (pdfSrc) window.open(pdfSrc, "_blank");
+                      }}
+                    >
+                      Download
+                    </Button>
+                  </div>
+                </ModalHeader>
+                <ModalBody className="p-0 overflow-hidden bg-slate-900 flex items-center justify-center min-h-[580px]">
+                  {pdfSrc ? (
+                    <div className="w-full h-[620px] relative">
+                      {/* Dual Layer: Google Docs Viewer iframe for cloud-hosted PDFs with direct fallback */}
+                      <iframe
+                        src={viewerUrl}
+                        title={previewDoc?.fileName || "PDF Viewer"}
+                        className="w-full h-full border-0 bg-white"
+                        onError={() => {
+                          toast.error("Cloud preview restricted. Use 'Open in New Tab' to view.");
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="p-12 text-center text-xs text-slate-400">
+                      <span className="material-symbols-rounded text-4xl mb-2 text-slate-500">error</span>
+                      <p>Document source link is unavailable.</p>
+                    </div>
+                  )}
+                </ModalBody>
+                <ModalFooter className="border-t border-slate-100 py-2.5">
+                  <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                    Close Viewer
+                  </Button>
+                </ModalFooter>
+              </>
+            );
+          }}
         </ModalContent>
       </Modal>
 
@@ -667,15 +698,16 @@ function DocumentDMSContent() {
               </ModalHeader>
               <ModalBody className="space-y-3 text-xs">
                 <div className="rounded-lg bg-blue-50/60 p-3 border border-blue-200 text-blue-950 font-medium">
-                  Document: <b className="font-bold">{previewDoc.title}</b>
+                  Document: <b className="font-bold">{previewDoc?.fileName}</b>
                 </div>
 
                 <Input
                   size="sm"
-                  label="Target Paragraph / Section Reference"
+                  label="Target Page Number"
                   labelPlacement="outside"
-                  value={annotationPara}
-                  onValueChange={setAnnotationPara}
+                  type="number"
+                  value={annotationPage.toString()}
+                  onChange={(e) => setAnnotationPage(parseInt(e.target.value) || 1)}
                   isRequired
                 />
 
@@ -690,18 +722,27 @@ function DocumentDMSContent() {
                   isRequired
                 />
 
-                <p className="text-[10px] text-slate-400">
-                  Annotated notes are encrypted and directly linked to <b>4.0 Green Sheet Notings</b> for formal departmental consideration.
-                </p>
+                {previewDoc?.annotations && previewDoc.annotations.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <p className="font-bold text-slate-700">Existing Notes on this File:</p>
+                    {previewDoc.annotations.map((ann, idx) => (
+                      <div key={idx} className="p-2 rounded bg-slate-50 border border-slate-200 text-[11px]">
+                        <span className="font-bold text-blue-800">Page {ann.pageNumber}:</span> {ann.comment}
+                        <p className="text-[9px] text-slate-400 mt-0.5">By {ann.authorName} ({ann.authorDesignation})</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isAnnotating}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  isLoading={isAnnotating}
                   onClick={handleSaveAnnotation}
                 >
                   Save Annotation

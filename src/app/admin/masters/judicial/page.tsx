@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   CardBody,
@@ -23,111 +23,217 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Skeleton,
 } from "@nextui-org/react";
 import Link from "next/link";
+import toast from "react-hot-toast";
+import { MastersAPI } from "@/api/mastersApi";
+
+interface CourtRecord {
+  _id: string;
+  courtName: string;
+  shortCode: string;
+  courtType: string;
+  location: string;
+  createdAt?: string;
+}
+
+interface CaseTypeRecord {
+  _id: string;
+  courtId: {
+    _id: string;
+    courtName: string;
+    shortCode: string;
+  };
+  caseTypeName: string;
+  shortName: string;
+  activeWritsCount?: number;
+  createdAt?: string;
+}
+
+const FORUM_TYPES = [
+  { key: "HIGH_COURT", label: "HIGH_COURT" },
+  { key: "APEX_COURT", label: "APEX_COURT" },
+  { key: "TRIBUNAL", label: "TRIBUNAL" },
+  { key: "SUBORDINATE_COURT", label: "SUBORDINATE_COURT" },
+];
 
 export default function JudicialMasterPage() {
-  const [selectedCourt, setSelectedCourt] = useState("High Court Allahabad");
+  const [selectedCourtId, setSelectedCourtId] = useState<string>("ALL");
+  const [courts, setCourts] = useState<CourtRecord[]>([]);
+  const [caseTypes, setCaseTypes] = useState<CaseTypeRecord[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const { isOpen: isAddCourtOpen, onOpen: onAddCourtOpen, onOpenChange: onAddCourtOpenChange } = useDisclosure();
   const { isOpen: isAddTypeOpen, onOpen: onAddTypeOpen, onOpenChange: onAddTypeOpenChange } = useDisclosure();
-  const { isOpen: isEditTypeOpen, onOpen: onEditTypeOpen, onOpenChange: onEditTypeOpenChange } = useDisclosure();
-  const { isOpen: isEditCourtOpen, onOpen: onEditCourtOpen, onOpenChange: onEditCourtOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
 
-  // Courts Master State
-  const [courts, setCourts] = useState([
-    { id: 1, name: "Supreme Court of India", type: "Apex Court", benches: "New Delhi", caseTypesCount: 8, activeWrits: 28 },
-    { id: 2, name: "High Court Allahabad", type: "High Court", benches: "Principal Bench (Prayagraj)", caseTypesCount: 14, activeWrits: 1102 },
-    { id: 3, name: "High Court Lucknow", type: "High Court", benches: "Lucknow Bench", caseTypesCount: 12, activeWrits: 341 },
-    { id: 4, name: "State Public Services Tribunal", type: "Tribunal", benches: "Indira Bhawan, Lucknow", caseTypesCount: 6, activeWrits: 14 },
-    { id: 5, name: "CJM Court Lucknow", type: "Subordinate Court", benches: "District Court Complex", caseTypesCount: 4, activeWrits: 3 },
-  ]);
-
-  // Case Types Master State
-  const [caseTypes, setCaseTypes] = useState([
-    { id: 1, court: "High Court Allahabad", typeName: "WRIT - A (Service Matters)", shortName: "WRIT-A", eCourtsCode: "WRITA", activeWrits: 842 },
-    { id: 2, court: "High Court Allahabad", typeName: "WRIT - C (Civil Miscellaneous)", shortName: "WRIT-C", eCourtsCode: "WRITC", activeWrits: 154 },
-    { id: 3, court: "High Court Allahabad", typeName: "CONTEMPT APPLICATION (CIVIL)", shortName: "CONTEMPT", eCourtsCode: "CONT", activeWrits: 28 },
-    { id: 4, court: "High Court Allahabad", typeName: "SPECIAL APPEAL DEFECTIVE", shortName: "SPL. APPEAL", eCourtsCode: "SPAD", activeWrits: 72 },
-    { id: 5, court: "High Court Allahabad", typeName: "CIVIL REVISION", shortName: "CIVIL REV", eCourtsCode: "CR", activeWrits: 6 },
-    { id: 6, court: "High Court Lucknow", typeName: "MISC. BENCH (WRIT-MB)", shortName: "WRIT-MB", eCourtsCode: "WMB", activeWrits: 110 },
-    { id: 7, court: "High Court Lucknow", typeName: "SERVICE BENCH (WRIT-SB)", shortName: "WRIT-SB", eCourtsCode: "WSB", activeWrits: 310 },
-  ]);
-
   // Add Form Inputs
-  const [newCaseType, setNewCaseType] = useState({ court: "High Court Allahabad", typeName: "", shortName: "", code: "" });
-  const [newCourt, setNewCourt] = useState({ name: "", type: "High Court", bench: "" });
+  const [newCaseType, setNewCaseType] = useState({
+    courtId: "",
+    caseTypeName: "",
+    shortName: "",
+  });
 
-  // Edit Form State
-  const [editingCaseType, setEditingCaseType] = useState<any>(null);
-  const [editingCourt, setEditingCourt] = useState<any>(null);
-  const [itemToDelete, setItemToDelete] = useState<any>(null);
+  const [newCourt, setNewCourt] = useState({
+    courtName: "",
+    shortCode: "",
+    courtType: "HIGH_COURT",
+    location: "",
+  });
+
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string; kind: "COURT" | "CASE_TYPE" } | null>(null);
+
+  // Load Judicial Data from Backend
+  const loadJudicialData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [resCourts, resCaseTypes] = await Promise.all([
+        MastersAPI.getCourts(),
+        MastersAPI.getCaseTypes(),
+      ]);
+
+      if (resCourts?.success) {
+        setCourts(resCourts.data || []);
+      }
+      if (resCaseTypes?.success) {
+        setCaseTypes(resCaseTypes.data || []);
+      }
+    } catch (err: any) {
+      console.error("[JudicialMaster] Error fetching:", err);
+      toast.error(err.response?.data?.message || "Failed to load judicial master records");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadJudicialData();
+  }, [loadJudicialData]);
+
+  // Dynamic filter items for Court selection
+  const courtFilterItems = useMemo(() => {
+    return [
+      { key: "ALL", label: "All Judicial Establishments" },
+      ...courts.map((court) => ({
+        key: court._id,
+        label: `${court.courtName} (${court.shortCode})`,
+      })),
+    ];
+  }, [courts]);
+
+  const courtSelectItems = useMemo(() => {
+    return courts.map((court) => ({
+      key: court._id,
+      label: `${court.courtName} (${court.shortCode})`,
+    }));
+  }, [courts]);
+
+  // Open Add Case Type Modal with Default Court
+  const handleOpenAddType = () => {
+    setNewCaseType({
+      courtId: courts[0]?._id || "",
+      caseTypeName: "",
+      shortName: "",
+    });
+    onAddTypeOpen();
+  };
+
+  // Open Add Court Modal
+  const handleOpenAddCourt = () => {
+    setNewCourt({
+      courtName: "",
+      shortCode: "",
+      courtType: "HIGH_COURT",
+      location: "",
+    });
+    onAddCourtOpen();
+  };
+
+  // Add Case Type Handler
+  const handleAddCaseType = async () => {
+    if (!newCaseType.courtId || !newCaseType.caseTypeName.trim() || !newCaseType.shortName.trim()) {
+      toast.error("Court selection, Case Type Name, and Short Name are required");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        courtId: newCaseType.courtId,
+        caseTypeName: newCaseType.caseTypeName.trim(),
+        shortName: newCaseType.shortName.trim().toUpperCase(),
+      };
+
+      const res = await MastersAPI.createCaseType(payload);
+      if (res?.success) {
+        toast.success(`Case Type ${payload.shortName} registered successfully!`);
+        onAddTypeOpenChange();
+        loadJudicialData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to save case type");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Add Court Handler
+  const handleAddCourt = async () => {
+    if (!newCourt.courtName.trim() || !newCourt.shortCode.trim() || !newCourt.location.trim()) {
+      toast.error("Court Name, Short Code, and Location Bench are required");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        courtName: newCourt.courtName.trim(),
+        shortCode: newCourt.shortCode.trim().toUpperCase(),
+        courtType: newCourt.courtType,
+        location: newCourt.location.trim(),
+      };
+
+      const res = await MastersAPI.createCourt(payload);
+      if (res?.success) {
+        toast.success(`Court ${payload.shortCode} registered successfully!`);
+        onAddCourtOpenChange();
+        loadJudicialData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to register court establishment");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Delete Handler
+  const handleConfirmDelete = async () => {
+    if (!itemToDelete) return;
+    setIsSubmitting(true);
+    try {
+      if (itemToDelete.kind === "CASE_TYPE") {
+        await MastersAPI.deleteCaseType(itemToDelete.id);
+        toast.success("Case Type removed.");
+      } else {
+        await MastersAPI.deleteCourt(itemToDelete.id);
+        toast.success("Court establishment removed.");
+      }
+      onDeleteOpenChange();
+      loadJudicialData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Cannot delete: Record in active use");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const filteredCaseTypes = useMemo(() => {
-    return caseTypes.filter((c) => selectedCourt === "ALL" || c.court === selectedCourt);
-  }, [caseTypes, selectedCourt]);
-
-  // Handlers
-  const handleAddCaseType = () => {
-    if (!newCaseType.typeName.trim() || !newCaseType.shortName.trim()) return;
-    setCaseTypes((prev) => [
-      ...prev,
-      {
-        id: prev.length + 1,
-        court: newCaseType.court,
-        typeName: newCaseType.typeName.trim(),
-        shortName: newCaseType.shortName.trim().toUpperCase(),
-        eCourtsCode: newCaseType.code.trim().toUpperCase() || newCaseType.shortName.trim().toUpperCase(),
-        activeWrits: 0,
-      },
-    ]);
-    setNewCaseType({ court: "High Court Allahabad", typeName: "", shortName: "", code: "" });
-    onAddTypeOpenChange();
-  };
-
-  const handleAddCourt = () => {
-    if (!newCourt.name.trim()) return;
-    setCourts((prev) => [
-      ...prev,
-      {
-        id: prev.length + 1,
-        name: newCourt.name.trim(),
-        type: newCourt.type,
-        benches: newCourt.bench.trim() || "Principal Bench",
-        caseTypesCount: 0,
-        activeWrits: 0,
-      },
-    ]);
-    setNewCourt({ name: "", type: "High Court", bench: "" });
-    onAddCourtOpenChange();
-  };
-
-  const handleSaveEditType = () => {
-    if (!editingCaseType) return;
-    setCaseTypes((prev) =>
-      prev.map((item) => (item.id === editingCaseType.id ? editingCaseType : item))
+    return caseTypes.filter(
+      (c) => selectedCourtId === "ALL" || c.courtId?._id === selectedCourtId
     );
-    onEditTypeOpenChange();
-  };
-
-  const handleSaveEditCourt = () => {
-    if (!editingCourt) return;
-    setCourts((prev) =>
-      prev.map((c) => (c.id === editingCourt.id ? editingCourt : c))
-    );
-    onEditCourtOpenChange();
-  };
-
-  const handleConfirmDelete = () => {
-    if (!itemToDelete) return;
-    if (itemToDelete.kind === "CASE_TYPE") {
-      setCaseTypes((prev) => prev.filter((item) => item.id !== itemToDelete.id));
-    } else {
-      setCourts((prev) => prev.filter((c) => c.id !== itemToDelete.id));
-    }
-    onDeleteOpenChange();
-  };
+  }, [caseTypes, selectedCourtId]);
 
   return (
     <div className="space-y-4">
@@ -137,12 +243,14 @@ export default function JudicialMasterPage() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <Link href="/admin/cases">
+                <Link href="/admin/masters">
                   <Button isIconOnly size="sm" variant="light" className="text-slate-500">
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
                 </Link>
-                <h1 className="text-base font-bold text-slate-900">6.5 Judicial Courts & Case Types Master</h1>
+                <h1 className="text-base font-bold text-slate-900">
+                  6.5 Judicial Courts & Case Types Master
+                </h1>
                 <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
                   eCourts Mapped
                 </Chip>
@@ -158,7 +266,7 @@ export default function JudicialMasterPage() {
                 radius="sm"
                 className="border-slate-200 bg-white text-xs font-semibold text-slate-700"
                 startContent={<span className="material-symbols-rounded text-sm">add</span>}
-                onPress={onAddCourtOpen}
+                onPress={handleOpenAddCourt}
               >
                 Add Court
               </Button>
@@ -167,7 +275,7 @@ export default function JudicialMasterPage() {
                 radius="sm"
                 className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
                 startContent={<span className="material-symbols-rounded text-sm">add</span>}
-                onPress={onAddTypeOpen}
+                onPress={handleOpenAddType}
               >
                 Add Case Type
               </Button>
@@ -178,136 +286,163 @@ export default function JudicialMasterPage() {
             <Tabs
               aria-label="Judicial Master Tabs"
               variant="underlined"
-              classNames={{ tabList: "gap-6", cursor: "bg-[#0f2744]", tab: "max-w-fit px-0 h-9 text-xs font-semibold" }}
+              classNames={{
+                tabList: "gap-6",
+                cursor: "bg-[#0f2744]",
+                tab: "max-w-fit px-0 h-9 text-xs font-semibold",
+              }}
             >
               {/* TAB 1: CASE TYPES */}
-              <Tab key="case_types" title="Case Types (Court Mapped)">
+              <Tab key="case_types" title={`Case Types (${caseTypes.length})`}>
                 <div className="mt-3 flex items-center justify-between">
                   <div className="w-72">
                     <Select
                       size="sm"
                       radius="sm"
-                      label="Filter by Court"
+                      label="Filter by Court Establishment"
                       labelPlacement="outside"
-                      selectedKeys={[selectedCourt]}
-                      onChange={(e) => setSelectedCourt(e.target.value || "ALL")}
+                      items={courtFilterItems}
+                      selectedKeys={[selectedCourtId]}
+                      onChange={(e) => setSelectedCourtId(e.target.value || "ALL")}
                       className="bg-slate-50 font-semibold"
                     >
-                      <SelectItem key="ALL">All Judicial Establishments</SelectItem>
-                      <SelectItem key="High Court Allahabad">High Court Allahabad</SelectItem>
-                      <SelectItem key="High Court Lucknow">High Court Lucknow</SelectItem>
-                      <SelectItem key="Supreme Court of India">Supreme Court of India</SelectItem>
-                      <SelectItem key="State Public Services Tribunal">State Public Services Tribunal</SelectItem>
+                      {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
                     </Select>
                   </div>
-                  <span className="text-xs font-medium text-slate-500">{filteredCaseTypes.length} Case Types Registered</span>
+                  <span className="text-xs font-medium text-slate-500">
+                    {filteredCaseTypes.length} Case Types Listed
+                  </span>
                 </div>
 
                 <div className="mt-3 overflow-hidden rounded-lg border border-slate-200/80">
                   <Table removeWrapper aria-label="Case Types Table" className="min-w-full">
                     <TableHeader>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">S.NO</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">COURT</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">OFFICIAL CASE TYPE</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">SHORT NAME</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">eCOURTS CODE</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">RUNNING WRITS</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        S.NO
+                      </TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        COURT ESTABLISHMENT
+                      </TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        OFFICIAL CASE TYPE
+                      </TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        SHORT NAME
+                      </TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
+                        ACTION
+                      </TableColumn>
                     </TableHeader>
-                    <TableBody items={filteredCaseTypes} emptyContent="No case types match the selected court filter.">
-                      {(item) => (
-                        <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                          <TableCell className="text-xs font-bold text-slate-400">{item.id}</TableCell>
-                          <TableCell className="text-xs font-semibold text-slate-800">{item.court}</TableCell>
-                          <TableCell className="text-xs font-bold text-slate-900">{item.typeName}</TableCell>
-                          <TableCell className="font-mono text-xs font-bold text-blue-700">{item.shortName}</TableCell>
-                          <TableCell><Chip size="sm" variant="flat" className="h-4 px-1 text-[10px] font-mono">{item.eCourtsCode}</Chip></TableCell>
-                          <TableCell><Chip size="sm" variant="flat" color="primary" className="text-[10px] font-bold">{item.activeWrits} Active</Chip></TableCell>
-                          <TableCell className="text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <Button
-                                isIconOnly
-                                size="sm"
-                                variant="light"
-                                className="text-slate-400 hover:text-slate-700"
-                                onClick={() => {
-                                  setEditingCaseType({ ...item });
-                                  onEditTypeOpen();
-                                }}
-                              >
-                                <span className="material-symbols-rounded text-sm">edit</span>
-                              </Button>
+                    <TableBody
+                      items={filteredCaseTypes}
+                      isLoading={loading}
+                      loadingContent={
+                        <div className="p-4 space-y-2">
+                          <Skeleton className="h-6 w-full rounded" />
+                          <Skeleton className="h-6 w-full rounded" />
+                        </div>
+                      }
+                      emptyContent={!loading ? "No case types match the selected court filter." : " "}
+                    >
+                      {(item) => {
+                        const index = caseTypes.findIndex((c) => c._id === item._id) + 1;
+                        return (
+                          <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                            <TableCell className="text-xs font-bold text-slate-400">{index}</TableCell>
+                            <TableCell className="text-xs font-semibold text-slate-800">
+                              {item.courtId?.courtName || "--"}
+                            </TableCell>
+                            <TableCell className="text-xs font-bold text-slate-900">
+                              {item.caseTypeName}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs font-bold text-blue-700">
+                              {item.shortName}
+                            </TableCell>
+                            <TableCell className="text-center">
                               <Button
                                 isIconOnly
                                 size="sm"
                                 variant="light"
                                 className="text-slate-400 hover:text-rose-600"
-                                onClick={() => {
-                                  setItemToDelete({ ...item, kind: "CASE_TYPE" });
+                                onPress={() => {
+                                  setItemToDelete({ id: item._id, name: item.shortName, kind: "CASE_TYPE" });
                                   onDeleteOpen();
                                 }}
                               >
                                 <span className="material-symbols-rounded text-sm">delete</span>
                               </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }}
                     </TableBody>
                   </Table>
                 </div>
               </Tab>
 
               {/* TAB 2: COURT ESTABLISHMENTS */}
-              <Tab key="courts" title="Court Establishments & Benches">
+              <Tab key="courts" title={`Court Establishments (${courts.length})`}>
                 <div className="mt-3 overflow-hidden rounded-lg border border-slate-200/80">
                   <Table removeWrapper aria-label="Courts Table" className="min-w-full">
                     <TableHeader>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">S.NO</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">COURT NAME</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">FORUM TYPE</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">BENCH LOCATION</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">MAPPED TYPES</TableColumn>
-                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        S.NO
+                      </TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        COURT NAME
+                      </TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        SHORT CODE
+                      </TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        FORUM TYPE
+                      </TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        BENCH LOCATION
+                      </TableColumn>
+                      <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
+                        ACTION
+                      </TableColumn>
                     </TableHeader>
-                    <TableBody items={courts} emptyContent="No court establishments configured.">
-                      {(item) => (
-                        <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                          <TableCell className="text-xs font-bold text-slate-400">{item.id}</TableCell>
-                          <TableCell className="text-xs font-bold text-slate-900">{item.name}</TableCell>
-                          <TableCell className="text-xs text-slate-600">{item.type}</TableCell>
-                          <TableCell className="text-xs text-slate-700 font-medium">{item.benches}</TableCell>
-                          <TableCell><Chip size="sm" variant="flat" color="primary" className="text-[10px] font-bold">{item.caseTypesCount} Types</Chip></TableCell>
-                          <TableCell className="text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              <Button
-                                isIconOnly
-                                size="sm"
-                                variant="light"
-                                className="text-slate-400 hover:text-slate-700"
-                                onClick={() => {
-                                  setEditingCourt({ ...item });
-                                  onEditCourtOpen();
-                                }}
-                              >
-                                <span className="material-symbols-rounded text-sm">edit</span>
-                              </Button>
+                    <TableBody
+                      items={courts}
+                      isLoading={loading}
+                      loadingContent={
+                        <div className="p-4 space-y-2">
+                          <Skeleton className="h-6 w-full rounded" />
+                          <Skeleton className="h-6 w-full rounded" />
+                        </div>
+                      }
+                      emptyContent={!loading ? "No court establishments configured." : " "}
+                    >
+                      {(item) => {
+                        const index = courts.findIndex((c) => c._id === item._id) + 1;
+                        return (
+                          <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                            <TableCell className="text-xs font-bold text-slate-400">{index}</TableCell>
+                            <TableCell className="text-xs font-bold text-slate-900">{item.courtName}</TableCell>
+                            <TableCell className="font-mono text-xs font-bold text-blue-700">
+                              {item.shortCode}
+                            </TableCell>
+                            <TableCell className="text-xs text-slate-600">{item.courtType}</TableCell>
+                            <TableCell className="text-xs text-slate-700 font-medium">{item.location}</TableCell>
+                            <TableCell className="text-center">
                               <Button
                                 isIconOnly
                                 size="sm"
                                 variant="light"
                                 className="text-slate-400 hover:text-rose-600"
-                                onClick={() => {
-                                  setItemToDelete({ ...item, kind: "COURT" });
+                                onPress={() => {
+                                  setItemToDelete({ id: item._id, name: item.courtName, kind: "COURT" });
                                   onDeleteOpen();
                                 }}
                               >
                                 <span className="material-symbols-rounded text-sm">delete</span>
                               </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }}
                     </TableBody>
                   </Table>
                 </div>
@@ -326,47 +461,45 @@ export default function JudicialMasterPage() {
               <ModalBody className="space-y-3">
                 <Select
                   size="sm"
-                  label="Court Forum"
+                  label="Court Establishment"
                   labelPlacement="outside"
-                  selectedKeys={[newCaseType.court]}
-                  onChange={(e) => setNewCaseType({ ...newCaseType, court: e.target.value })}
+                  items={courtSelectItems}
+                  selectedKeys={newCaseType.courtId ? [newCaseType.courtId] : []}
+                  onChange={(e) => setNewCaseType({ ...newCaseType, courtId: e.target.value })}
                   isRequired
                 >
-                  <SelectItem key="High Court Allahabad">High Court Allahabad</SelectItem>
-                  <SelectItem key="High Court Lucknow">High Court Lucknow</SelectItem>
-                  <SelectItem key="Supreme Court of India">Supreme Court of India</SelectItem>
-                  <SelectItem key="State Public Services Tribunal">State Public Services Tribunal</SelectItem>
+                  {(court) => <SelectItem key={court.key}>{court.label}</SelectItem>}
                 </Select>
                 <Input
                   size="sm"
                   label="Case Type Full Name"
                   labelPlacement="outside"
                   placeholder="e.g. WRIT - A (Civil Services)"
-                  value={newCaseType.typeName}
-                  onValueChange={(v) => setNewCaseType({ ...newCaseType, typeName: v })}
+                  value={newCaseType.caseTypeName}
+                  onValueChange={(v) => setNewCaseType({ ...newCaseType, caseTypeName: v })}
                   isRequired
                 />
                 <Input
                   size="sm"
-                  label="Short Acronym"
+                  label="Short Acronym / Code"
                   labelPlacement="outside"
                   placeholder="e.g. WRIT-A"
                   value={newCaseType.shortName}
                   onValueChange={(v) => setNewCaseType({ ...newCaseType, shortName: v })}
                   isRequired
                 />
-                <Input
-                  size="sm"
-                  label="CIS / eCourts Code"
-                  labelPlacement="outside"
-                  placeholder="e.g. WRITA"
-                  value={newCaseType.code}
-                  onValueChange={(v) => setNewCaseType({ ...newCaseType, code: v })}
-                />
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>Cancel</Button>
-                <Button size="sm" radius="sm" className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]" onClick={handleAddCaseType}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  radius="sm"
+                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  isLoading={isSubmitting}
+                  onClick={handleAddCaseType}
+                >
                   Save Case Type
                 </Button>
               </ModalFooter>
@@ -386,36 +519,51 @@ export default function JudicialMasterPage() {
                   size="sm"
                   label="Court Establishment Name"
                   labelPlacement="outside"
-                  placeholder="e.g. Central Administrative Tribunal"
-                  value={newCourt.name}
-                  onValueChange={(v) => setNewCourt({ ...newCourt, name: v })}
+                  placeholder="e.g. High Court Allahabad"
+                  value={newCourt.courtName}
+                  onValueChange={(v) => setNewCourt({ ...newCourt, courtName: v })}
+                  isRequired
+                />
+                <Input
+                  size="sm"
+                  label="Short Acronym Code"
+                  labelPlacement="outside"
+                  placeholder="e.g. HC-ALD"
+                  value={newCourt.shortCode}
+                  onValueChange={(v) => setNewCourt({ ...newCourt, shortCode: v })}
                   isRequired
                 />
                 <Select
                   size="sm"
                   label="Forum Classification"
                   labelPlacement="outside"
-                  selectedKeys={[newCourt.type]}
-                  onChange={(e) => setNewCourt({ ...newCourt, type: e.target.value })}
+                  items={FORUM_TYPES}
+                  selectedKeys={[newCourt.courtType]}
+                  onChange={(e) => setNewCourt({ ...newCourt, courtType: e.target.value })}
                 >
-                  <SelectItem key="Apex Court">Apex Court</SelectItem>
-                  <SelectItem key="High Court">High Court</SelectItem>
-                  <SelectItem key="Tribunal">Tribunal</SelectItem>
-                  <SelectItem key="Subordinate Court">Subordinate Court</SelectItem>
+                  {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
                 </Select>
                 <Input
                   size="sm"
                   label="Bench / Seat Location"
                   labelPlacement="outside"
-                  placeholder="e.g. Lucknow Bench"
-                  value={newCourt.bench}
-                  onValueChange={(v) => setNewCourt({ ...newCourt, bench: v })}
+                  placeholder="e.g. Principal Bench (Prayagraj)"
+                  value={newCourt.location}
+                  onValueChange={(v) => setNewCourt({ ...newCourt, location: v })}
                   isRequired
                 />
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>Cancel</Button>
-                <Button size="sm" radius="sm" className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]" onClick={handleAddCourt}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  radius="sm"
+                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  isLoading={isSubmitting}
+                  onClick={handleAddCourt}
+                >
                   Save Court
                 </Button>
               </ModalFooter>
@@ -424,84 +572,7 @@ export default function JudicialMasterPage() {
         </ModalContent>
       </Modal>
 
-      {/* MODAL 3: EDIT CASE TYPE */}
-      <Modal isOpen={isEditTypeOpen} onOpenChange={onEditTypeOpenChange} placement="top">
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader className="text-sm font-bold text-slate-900">Edit Case Type: {editingCaseType?.shortName}</ModalHeader>
-              <ModalBody className="space-y-3">
-                <Input
-                  size="sm"
-                  label="Case Type Name"
-                  labelPlacement="outside"
-                  value={editingCaseType?.typeName || ""}
-                  onValueChange={(v) => setEditingCaseType({ ...editingCaseType, typeName: v })}
-                  isRequired
-                />
-                <Input
-                  size="sm"
-                  label="Short Name"
-                  labelPlacement="outside"
-                  value={editingCaseType?.shortName || ""}
-                  onValueChange={(v) => setEditingCaseType({ ...editingCaseType, shortName: v })}
-                  isRequired
-                />
-                <Input
-                  size="sm"
-                  label="eCourts / CIS Code"
-                  labelPlacement="outside"
-                  value={editingCaseType?.eCourtsCode || ""}
-                  onValueChange={(v) => setEditingCaseType({ ...editingCaseType, eCourtsCode: v })}
-                />
-              </ModalBody>
-              <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>Cancel</Button>
-                <Button size="sm" radius="sm" className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]" onClick={handleSaveEditType}>
-                  Save Changes
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* MODAL 4: EDIT COURT */}
-      <Modal isOpen={isEditCourtOpen} onOpenChange={onEditCourtOpenChange} placement="top">
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader className="text-sm font-bold text-slate-900">Edit Court: {editingCourt?.name}</ModalHeader>
-              <ModalBody className="space-y-3">
-                <Input
-                  size="sm"
-                  label="Court Name"
-                  labelPlacement="outside"
-                  value={editingCourt?.name || ""}
-                  onValueChange={(v) => setEditingCourt({ ...editingCourt, name: v })}
-                  isRequired
-                />
-                <Input
-                  size="sm"
-                  label="Bench / Seat Location"
-                  labelPlacement="outside"
-                  value={editingCourt?.benches || ""}
-                  onValueChange={(v) => setEditingCourt({ ...editingCourt, benches: v })}
-                  isRequired
-                />
-              </ModalBody>
-              <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>Cancel</Button>
-                <Button size="sm" radius="sm" className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]" onClick={handleSaveEditCourt}>
-                  Save Changes
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* MODAL 5: DELETE CONFIRMATION */}
+      {/* MODAL 3: DELETE CONFIRMATION */}
       <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
         <ModalContent>
           {(onClose) => (
@@ -511,16 +582,19 @@ export default function JudicialMasterPage() {
                 Confirm Deletion
               </ModalHeader>
               <ModalBody className="text-xs text-slate-600">
-                Are you sure you want to remove <b>{itemToDelete?.typeName || itemToDelete?.name}</b>?
-                {itemToDelete?.activeWrits > 0 && (
-                  <p className="mt-2 text-rose-600 font-bold">
-                    Warning: There are {itemToDelete.activeWrits} active writs referencing this judicial entry.
-                  </p>
-                )}
+                Are you sure you want to remove <b>{itemToDelete?.name}</b>? Linked dockets or case types in active litigation might be affected.
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>Cancel</Button>
-                <Button size="sm" radius="sm" className="bg-rose-600 font-semibold text-white hover:bg-rose-700" onClick={handleConfirmDelete}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  radius="sm"
+                  className="bg-rose-600 font-semibold text-white hover:bg-rose-700"
+                  isLoading={isSubmitting}
+                  onClick={handleConfirmDelete}
+                >
                   Delete Record
                 </Button>
               </ModalFooter>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   CardBody,
@@ -21,81 +21,166 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Skeleton,
 } from "@nextui-org/react";
 import Link from "next/link";
+import toast from "react-hot-toast";
+import { MastersAPI } from "@/api/mastersApi";
+
+interface DesignationRecord {
+  _id: string;
+  title: string;
+  authorityLevel: string;
+  defaultRole: string;
+  canSignPWC?: boolean;
+  canForwardFiles?: boolean;
+  createdAt?: string;
+}
+
+const AUTHORITY_TIERS = [
+  { key: "Apex Board Authority", label: "Apex Board Authority" },
+  { key: "Senior Administrative", label: "Senior Administrative" },
+  { key: "Head of Legal Cell", label: "Head of Legal Cell" },
+  { key: "Wing Head", label: "Wing Head" },
+  { key: "Division Head", label: "Division Head" },
+  { key: "Judicial Advisory", label: "Judicial Advisory" },
+  { key: "Legal Desk Operator", label: "Legal Desk Operator" },
+];
+
+const AUTHORITY_FILTER_ITEMS = [
+  { key: "ALL", label: "All Authority Tiers" },
+  ...AUTHORITY_TIERS,
+];
+
+const DEFAULT_ROLES = [
+  { key: "Executive Head", label: "Executive Head" },
+  { key: "Operational Head", label: "Operational Head" },
+  { key: "Officer-in-Charge (OIC)", label: "Officer-in-Charge (OIC)" },
+  { key: "OIC & PWC Authority", label: "OIC & PWC Authority" },
+  { key: "Recruitment Custodian", label: "Recruitment Custodian" },
+  { key: "Promotion Custodian", label: "Promotion Custodian" },
+  { key: "Legal Vetting Officer", label: "Legal Vetting Officer" },
+  { key: "Noting / Filing Desk", label: "Noting / Filing Desk" },
+];
 
 export default function DesignationMasterPage() {
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
   const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
 
+  const [designations, setDesignations] = useState<DesignationRecord[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTierFilter, setSelectedTierFilter] = useState("ALL");
-
-  const [designations, setDesignations] = useState([
-    { id: 1, title: "Chairman / DG", authorityLevel: "Apex Board Authority", defaultRole: "Executive Head" },
-    { id: 2, title: "Member Secretary / ADG", authorityLevel: "Senior Administrative", defaultRole: "Operational Head" },
-    { id: 3, title: "Superintendent of Police (Legal)", authorityLevel: "Head of Legal Cell", defaultRole: "OIC & PWC Authority" },
-    { id: 4, title: "Additional Secretary / S.P. (Recruitment)", authorityLevel: "Wing Head", defaultRole: "Recruitment Custodian" },
-    { id: 5, title: "Dy.SP (Promotion)", authorityLevel: "Division Head", defaultRole: "Promotion Custodian" },
-    { id: 6, title: "Senior Prosecuting Officer (SPO)", authorityLevel: "Judicial Advisory", defaultRole: "Legal Vetting Officer" },
-    { id: 7, title: "Assistant Sub Inspector (M)", authorityLevel: "Legal Desk Operator", defaultRole: "Noting / Filing Desk" },
-  ]);
 
   const [formData, setFormData] = useState({
     title: "",
     authorityLevel: "Legal Desk Operator",
     defaultRole: "Noting / Filing Desk",
+    canSignPWC: false,
+    canForwardFiles: true,
   });
 
-  const [editingItem, setEditingItem] = useState<any>(null);
-  const [itemToDelete, setItemToDelete] = useState<any>(null);
+  const [editingItem, setEditingItem] = useState<DesignationRecord | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<DesignationRecord | null>(null);
 
-  const handleAdd = () => {
-    if (!formData.title.trim()) return;
-    setDesignations((prev) => [
-      ...prev,
-      {
-        id: prev.length + 1,
+  // Fetch Designations from Backend
+  const fetchDesignations = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await MastersAPI.getDesignations();
+      if (res?.success) {
+        setDesignations(res.data || []);
+      }
+    } catch (err: any) {
+      console.error("[DesignationMaster] Error fetching:", err);
+      toast.error(err.response?.data?.message || "Failed to load designations");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDesignations();
+  }, [fetchDesignations]);
+
+  const handleOpenAdd = () => {
+    setFormData({
+      title: "",
+      authorityLevel: "Legal Desk Operator",
+      defaultRole: "Noting / Filing Desk",
+      canSignPWC: false,
+      canForwardFiles: true,
+    });
+    onAddOpen();
+  };
+
+  // Submit Add to Backend
+  const handleAdd = async () => {
+    if (!formData.title.trim()) {
+      toast.error("Designation title is required!");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const payload = {
         title: formData.title.trim(),
         authorityLevel: formData.authorityLevel,
         defaultRole: formData.defaultRole,
-      },
-    ]);
-    setFormData({ title: "", authorityLevel: "Legal Desk Operator", defaultRole: "Noting / Filing Desk" });
-    onAddOpenChange();
+        canSignPWC: formData.authorityLevel.includes("Head") || formData.authorityLevel.includes("Apex"),
+        canForwardFiles: true,
+      };
+
+      const res = await MastersAPI.createDesignation(payload);
+      if (res?.success) {
+        toast.success(`Designation "${payload.title}" created successfully!`);
+        onAddOpenChange();
+        fetchDesignations();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to create designation");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleOpenEdit = (item: any) => {
+  const handleOpenEdit = (item: DesignationRecord) => {
     setEditingItem({ ...item });
     onEditOpen();
   };
 
-  const handleSaveEdit = () => {
-    if (!editingItem) return;
+  const handleSaveEdit = async () => {
+    if (!editingItem || !editingItem.title.trim()) return;
     setDesignations((prev) =>
-      prev.map((d) => (d.id === editingItem.id ? editingItem : d))
+      prev.map((d) => (d._id === editingItem._id ? { ...editingItem } : d))
     );
+    toast.success(`Updated designation: ${editingItem.title}`);
     onEditOpenChange();
+    setEditingItem(null);
   };
 
-  const handleOpenDelete = (item: any) => {
+  const handleOpenDelete = (item: DesignationRecord) => {
     setItemToDelete(item);
     onDeleteOpen();
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
-    setDesignations((prev) => prev.filter((d) => d.id !== itemToDelete.id));
+    setDesignations((prev) => prev.filter((d) => d._id !== itemToDelete._id));
+    toast.success(`Designation "${itemToDelete.title}" removed.`);
     onDeleteOpenChange();
+    setItemToDelete(null);
   };
 
   const filteredDesignations = useMemo(() => {
     return designations.filter((item) => {
       const matchesSearch =
-        item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.authorityLevel.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.defaultRole.toLowerCase().includes(searchQuery.toLowerCase());
+        item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.authorityLevel?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.defaultRole?.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesTier =
         selectedTierFilter === "ALL" || item.authorityLevel === selectedTierFilter;
@@ -112,12 +197,14 @@ export default function DesignationMasterPage() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <Link href="/admin/cases">
+                <Link href="/admin/masters">
                   <Button isIconOnly size="sm" variant="light" className="text-slate-500">
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
                 </Link>
-                <h1 className="text-base font-bold text-slate-900">6.4 Designation & Administrative Roles Master</h1>
+                <h1 className="text-base font-bold text-slate-900">
+                  6.4 Designation & Administrative Roles Master
+                </h1>
                 <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
                   {designations.length} Designations Mapped
                 </Chip>
@@ -131,7 +218,7 @@ export default function DesignationMasterPage() {
               radius="sm"
               className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
               startContent={<span className="material-symbols-rounded text-sm">add</span>}
-              onPress={onAddOpen}
+              onPress={handleOpenAdd}
             >
               Add Designation
             </Button>
@@ -151,19 +238,14 @@ export default function DesignationMasterPage() {
             <Select
               size="sm"
               radius="sm"
+              aria-label="Filter by Authority Tier"
               placeholder="Filter by Authority Tier"
+              items={AUTHORITY_FILTER_ITEMS}
               selectedKeys={[selectedTierFilter]}
               onChange={(e) => setSelectedTierFilter(e.target.value || "ALL")}
               className="bg-slate-50"
             >
-              <SelectItem key="ALL">All Authority Tiers</SelectItem>
-              <SelectItem key="Apex Board Authority">Apex Board Authority</SelectItem>
-              <SelectItem key="Senior Administrative">Senior Administrative</SelectItem>
-              <SelectItem key="Head of Legal Cell">Head of Legal Cell</SelectItem>
-              <SelectItem key="Wing Head">Wing Head</SelectItem>
-              <SelectItem key="Division Head">Division Head</SelectItem>
-              <SelectItem key="Judicial Advisory">Judicial Advisory</SelectItem>
-              <SelectItem key="Legal Desk Operator">Legal Desk Operator</SelectItem>
+              {(tier) => <SelectItem key={tier.key}>{tier.label}</SelectItem>}
             </Select>
           </div>
         </CardBody>
@@ -174,43 +256,71 @@ export default function DesignationMasterPage() {
         <CardBody className="p-0">
           <Table removeWrapper aria-label="Designation Master Table" className="min-w-full">
             <TableHeader>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">S.NO</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">OFFICIAL DESIGNATION TITLE</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">AUTHORITY TIER</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">DEFAULT CASE ROLE</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                S.NO
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                OFFICIAL DESIGNATION TITLE
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                AUTHORITY TIER
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                DEFAULT CASE ROLE
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
+                ACTION
+              </TableColumn>
             </TableHeader>
-            <TableBody items={filteredDesignations} emptyContent="No administrative designations match the specified criteria.">
-              {(item) => (
-                <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                  <TableCell className="text-xs font-bold text-slate-400">{item.id}</TableCell>
-                  <TableCell className="text-xs font-bold text-slate-900">{item.title}</TableCell>
-                  <TableCell className="text-xs text-slate-700 font-medium">{item.authorityLevel}</TableCell>
-                  <TableCell className="text-xs text-blue-700 font-semibold">{item.defaultRole}</TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        className="text-slate-400 hover:text-slate-700"
-                        onClick={() => handleOpenEdit(item)}
-                      >
-                        <span className="material-symbols-rounded text-sm">edit</span>
-                      </Button>
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        className="text-slate-400 hover:text-rose-600"
-                        onClick={() => handleOpenDelete(item)}
-                      >
-                        <span className="material-symbols-rounded text-sm">delete</span>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
+            <TableBody
+              items={filteredDesignations}
+              isLoading={loading}
+              loadingContent={
+                <div className="p-4 space-y-2">
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                </div>
+              }
+              emptyContent={!loading ? "No administrative designations match the specified criteria." : " "}
+            >
+              {(item) => {
+                const index = designations.findIndex((d) => d._id === item._id) + 1;
+                return (
+                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell className="text-xs font-bold text-slate-400">{index}</TableCell>
+                    <TableCell className="text-xs font-bold text-slate-900">{item.title}</TableCell>
+                    <TableCell className="text-xs text-slate-700 font-medium">
+                      {item.authorityLevel}
+                    </TableCell>
+                    <TableCell className="text-xs text-blue-700 font-semibold">
+                      {item.defaultRole}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="light"
+                          className="text-slate-400 hover:text-slate-700"
+                          onClick={() => handleOpenEdit(item)}
+                        >
+                          <span className="material-symbols-rounded text-sm">edit</span>
+                        </Button>
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="light"
+                          className="text-slate-400 hover:text-rose-600"
+                          onClick={() => handleOpenDelete(item)}
+                        >
+                          <span className="material-symbols-rounded text-sm">delete</span>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              }}
             </TableBody>
           </Table>
         </CardBody>
@@ -239,33 +349,23 @@ export default function DesignationMasterPage() {
                   size="sm"
                   label="Authority Level / Signing Tier"
                   labelPlacement="outside"
+                  items={AUTHORITY_TIERS}
                   selectedKeys={[formData.authorityLevel]}
                   onChange={(e) => setFormData({ ...formData, authorityLevel: e.target.value })}
                   isRequired
                 >
-                  <SelectItem key="Apex Board Authority">Apex Board Authority</SelectItem>
-                  <SelectItem key="Senior Administrative">Senior Administrative</SelectItem>
-                  <SelectItem key="Head of Legal Cell">Head of Legal Cell</SelectItem>
-                  <SelectItem key="Wing Head">Wing Head</SelectItem>
-                  <SelectItem key="Division Head">Division Head</SelectItem>
-                  <SelectItem key="Judicial Advisory">Judicial Advisory</SelectItem>
-                  <SelectItem key="Legal Desk Operator">Legal Desk Operator</SelectItem>
+                  {(tier) => <SelectItem key={tier.key}>{tier.label}</SelectItem>}
                 </Select>
                 <Select
                   size="sm"
                   label="Default Case Management Role"
                   labelPlacement="outside"
+                  items={DEFAULT_ROLES}
                   selectedKeys={[formData.defaultRole]}
                   onChange={(e) => setFormData({ ...formData, defaultRole: e.target.value })}
                   isRequired
                 >
-                  <SelectItem key="Executive Head">Executive Head</SelectItem>
-                  <SelectItem key="Operational Head">Operational Head</SelectItem>
-                  <SelectItem key="OIC & PWC Authority">OIC & PWC Authority</SelectItem>
-                  <SelectItem key="Recruitment Custodian">Recruitment Custodian</SelectItem>
-                  <SelectItem key="Promotion Custodian">Promotion Custodian</SelectItem>
-                  <SelectItem key="Legal Vetting Officer">Legal Vetting Officer</SelectItem>
-                  <SelectItem key="Noting / Filing Desk">Noting / Filing Desk</SelectItem>
+                  {(role) => <SelectItem key={role.key}>{role.label}</SelectItem>}
                 </Select>
               </ModalBody>
               <ModalFooter>
@@ -276,6 +376,7 @@ export default function DesignationMasterPage() {
                   size="sm"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  isLoading={isSubmitting}
                   onClick={handleAdd}
                 >
                   Save Designation
@@ -301,38 +402,38 @@ export default function DesignationMasterPage() {
                   label="Designation Title"
                   labelPlacement="outside"
                   value={editingItem?.title || ""}
-                  onValueChange={(v) => setEditingItem({ ...editingItem, title: v })}
+                  onValueChange={(v) =>
+                    setEditingItem(editingItem ? { ...editingItem, title: v } : null)
+                  }
                   isRequired
                 />
                 <Select
                   size="sm"
                   label="Authority Level"
                   labelPlacement="outside"
+                  items={AUTHORITY_TIERS}
                   selectedKeys={editingItem ? [editingItem.authorityLevel] : ["Legal Desk Operator"]}
-                  onChange={(e) => setEditingItem({ ...editingItem, authorityLevel: e.target.value })}
+                  onChange={(e) =>
+                    setEditingItem(
+                      editingItem ? { ...editingItem, authorityLevel: e.target.value } : null
+                    )
+                  }
                 >
-                  <SelectItem key="Apex Board Authority">Apex Board Authority</SelectItem>
-                  <SelectItem key="Senior Administrative">Senior Administrative</SelectItem>
-                  <SelectItem key="Head of Legal Cell">Head of Legal Cell</SelectItem>
-                  <SelectItem key="Wing Head">Wing Head</SelectItem>
-                  <SelectItem key="Division Head">Division Head</SelectItem>
-                  <SelectItem key="Judicial Advisory">Judicial Advisory</SelectItem>
-                  <SelectItem key="Legal Desk Operator">Legal Desk Operator</SelectItem>
+                  {(tier) => <SelectItem key={tier.key}>{tier.label}</SelectItem>}
                 </Select>
                 <Select
                   size="sm"
                   label="Default Case Role"
                   labelPlacement="outside"
+                  items={DEFAULT_ROLES}
                   selectedKeys={editingItem ? [editingItem.defaultRole] : ["Noting / Filing Desk"]}
-                  onChange={(e) => setEditingItem({ ...editingItem, defaultRole: e.target.value })}
+                  onChange={(e) =>
+                    setEditingItem(
+                      editingItem ? { ...editingItem, defaultRole: e.target.value } : null
+                    )
+                  }
                 >
-                  <SelectItem key="Executive Head">Executive Head</SelectItem>
-                  <SelectItem key="Operational Head">Operational Head</SelectItem>
-                  <SelectItem key="OIC & PWC Authority">OIC & PWC Authority</SelectItem>
-                  <SelectItem key="Recruitment Custodian">Recruitment Custodian</SelectItem>
-                  <SelectItem key="Promotion Custodian">Promotion Custodian</SelectItem>
-                  <SelectItem key="Legal Vetting Officer">Legal Vetting Officer</SelectItem>
-                  <SelectItem key="Noting / Filing Desk">Noting / Filing Desk</SelectItem>
+                  {(role) => <SelectItem key={role.key}>{role.label}</SelectItem>}
                 </Select>
               </ModalBody>
               <ModalFooter>

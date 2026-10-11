@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   CardBody,
@@ -21,89 +21,207 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Skeleton,
 } from "@nextui-org/react";
 import Link from "next/link";
+import { useForm, Controller, SubmitHandler } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import toast from "react-hot-toast";
+import { MastersAPI } from "@/api/mastersApi";
+import { z } from "zod";
+
+const departmentFormSchema = z.object({
+  unitName: z.string().min(2, "Unit Name is required").trim(),
+  unitCode: z.string().min(2, "Unit Code is required").toUpperCase().trim(),
+  parentFormation: z.string().min(1, "Parent Formation is required"),
+  headquarters: z.string().min(2, "Headquarters is required").trim(),
+});
+
+type DepartmentFormValues = z.infer<typeof departmentFormSchema>;
+
+interface DepartmentRecord {
+  _id: string;
+  unitName: string;
+  unitCode: string;
+  parentFormation: string;
+  headquarters: string;
+  activeWritsCount: number;
+  createdAt?: string;
+}
+
+const PARENT_FORMATIONS = [
+  { key: "State Police Headquarter", label: "State Police Headquarter" },
+  { key: "Recruitment Board", label: "Recruitment Board" },
+  { key: "Vigilance Wing", label: "Vigilance Wing" },
+  { key: "Director General Office", label: "Director General Office" },
+  { key: "Special Wing", label: "Special Wing" },
+];
+
+const PARENT_FORMATION_FILTER_ITEMS = [
+  { key: "ALL", label: "All Parent Formations" },
+  ...PARENT_FORMATIONS,
+];
 
 export default function OrganizationMasterPage() {
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
   const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
 
+  const [departments, setDepartments] = useState<DepartmentRecord[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedParentFilter, setSelectedParentFilter] = useState("ALL");
 
-  const [departments, setDepartments] = useState([
-    { id: 1, name: "DISTRICT EFFECTIVE FORCE", code: "DEF", parent: "State Police Headquarter", activeCases: 412 },
-    { id: 2, name: "Training Directorate", code: "TRG", parent: "State Police Headquarter", activeCases: 89 },
-    { id: 3, name: "Criminal Investigation Department (CID)", code: "CID", parent: "State Police Headquarter", activeCases: 34 },
-    { id: 4, name: "Special Enquiry Cell", code: "SEC", parent: "Recruitment Board", activeCases: 19 },
-    { id: 5, name: "Anti Corruption Organization (ACO)", code: "ACO", parent: "Vigilance Wing", activeCases: 12 },
-    { id: 6, name: "Human Rights Cell (HRC)", code: "HRC", parent: "Director General Office", activeCases: 7 },
-    { id: 7, name: "Anti-Terrorist Squad (ATS)", code: "ATS", parent: "Special Wing", activeCases: 3 },
-    { id: 8, name: "Intelligence Department (IB)", code: "INT", parent: "State Police Headquarter", activeCases: 15 },
-  ]);
+  const [editingDept, setEditingDept] = useState<DepartmentRecord | null>(null);
+  const [deptToDelete, setDeptToDelete] = useState<DepartmentRecord | null>(null);
 
-  const [newDept, setNewDept] = useState({ name: "", code: "", parent: "State Police Headquarter" });
-  const [editingDept, setEditingDept] = useState<any>(null);
-  const [deptToDelete, setDeptToDelete] = useState<any>(null);
+  // React Hook Form for Add
+  const {
+    control: addControl,
+    handleSubmit: handleAddSubmit,
+    reset: resetAddForm,
+    formState: { errors: addErrors },
+  } = useForm<DepartmentFormValues>({
+    resolver: zodResolver(departmentFormSchema),
+    defaultValues: {
+      unitName: "",
+      unitCode: "",
+      parentFormation: "State Police Headquarter",
+      headquarters: "Lucknow",
+    },
+  });
 
-  const parentFormations = [
-    { key: "State Police Headquarter", label: "State Police Headquarter" },
-    { key: "Recruitment Board", label: "Recruitment Board" },
-    { key: "Vigilance Wing", label: "Vigilance Wing" },
-    { key: "Director General Office", label: "Director General Office" },
-    { key: "Special Wing", label: "Special Wing" },
-  ];
+  // React Hook Form for Edit
+  const {
+    control: editControl,
+    handleSubmit: handleEditSubmit,
+    reset: resetEditForm,
+    formState: { errors: editErrors },
+  } = useForm<DepartmentFormValues>({
+    resolver: zodResolver(departmentFormSchema),
+    defaultValues: {
+      unitName: "",
+      unitCode: "",
+      parentFormation: "State Police Headquarter",
+      headquarters: "Lucknow",
+    },
+  });
 
-  const handleAdd = () => {
-    if (!newDept.name.trim()) return;
-    setDepartments((prev) => [
-      ...prev,
-      {
-        id: prev.length + 1,
-        name: newDept.name.trim(),
-        code: newDept.code.trim().toUpperCase() || `DEP-${prev.length + 1}`,
-        parent: newDept.parent,
-        activeCases: 0,
-      },
-    ]);
-    setNewDept({ name: "", code: "", parent: "State Police Headquarter" });
-    onAddOpenChange();
+  // Fetch Departments from Real Backend API
+  const fetchDepartments = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await MastersAPI.getDepartments();
+      if (res?.success) {
+        setDepartments(res.data || []);
+      }
+    } catch (err: any) {
+      console.error("[OrganizationMaster] Error fetching:", err);
+      toast.error(err.response?.data?.message || "Failed to load departments list");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDepartments();
+  }, [fetchDepartments]);
+
+  // Open Add Modal
+  const handleOpenAdd = () => {
+    resetAddForm({
+      unitName: "",
+      unitCode: "",
+      parentFormation: "State Police Headquarter",
+      headquarters: "Lucknow",
+    });
+    onAddOpen();
   };
 
-  const handleOpenEdit = (item: any) => {
-    setEditingDept({ ...item });
+  // Submit Add to Backend
+  const onAddDepartment: SubmitHandler<DepartmentFormValues> = async (values) => {
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        unitName: values.unitName.trim(),
+        unitCode: values.unitCode.trim().toUpperCase(),
+        parentFormation: values.parentFormation,
+        headquarters: values.headquarters.trim() || "Lucknow",
+      };
+
+      const res = await MastersAPI.createDepartment(payload);
+      if (res?.success) {
+        toast.success(`Department ${payload.unitCode} added successfully!`);
+        onAddOpenChange();
+        fetchDepartments();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to register department");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Open Edit Modal
+  const handleOpenEdit = (item: DepartmentRecord) => {
+    setEditingDept(item);
+    resetEditForm({
+      unitName: item.unitName,
+      unitCode: item.unitCode,
+      parentFormation: item.parentFormation,
+      headquarters: item.headquarters || "Lucknow",
+    });
     onEditOpen();
   };
 
-  const handleSaveEdit = () => {
+  // Save Edit
+  const onSaveEdit: SubmitHandler<DepartmentFormValues> = async (values) => {
     if (!editingDept) return;
-    setDepartments((prev) =>
-      prev.map((d) => (d.id === editingDept.id ? editingDept : d))
-    );
-    onEditOpenChange();
+    try {
+      setIsSubmitting(true);
+      setDepartments((prev) =>
+        prev.map((d) =>
+          d._id === editingDept._id
+            ? { ...d, ...values, unitCode: values.unitCode.toUpperCase() }
+            : d
+        )
+      );
+      toast.success(`Updated ${values.unitCode}`);
+      onEditOpenChange();
+      setEditingDept(null);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to update department");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleOpenDelete = (item: any) => {
+  // Open Delete Prompt
+  const handleOpenDelete = (item: DepartmentRecord) => {
     setDeptToDelete(item);
     onDeleteOpen();
   };
 
-  const handleConfirmDelete = () => {
+  // Confirm Delete
+  const handleConfirmDelete = async () => {
     if (!deptToDelete) return;
-    setDepartments((prev) => prev.filter((d) => d.id !== deptToDelete.id));
+    setDepartments((prev) => prev.filter((d) => d._id !== deptToDelete._id));
+    toast.success(`Unit ${deptToDelete.unitCode} removed.`);
     onDeleteOpenChange();
+    setDeptToDelete(null);
   };
 
   const filteredDepartments = useMemo(() => {
     return departments.filter((item) => {
       const matchesSearch =
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.parent.toLowerCase().includes(searchQuery.toLowerCase());
+        item.unitName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.unitCode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.parentFormation?.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesParent =
-        selectedParentFilter === "ALL" || item.parent === selectedParentFilter;
+        selectedParentFilter === "ALL" || item.parentFormation === selectedParentFilter;
 
       return matchesSearch && matchesParent;
     });
@@ -117,12 +235,14 @@ export default function OrganizationMasterPage() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <Link href="/admin/cases">
+                <Link href="/admin/masters">
                   <Button isIconOnly size="sm" variant="light" className="text-slate-500">
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
                 </Link>
-                <h1 className="text-base font-bold text-slate-900">6.2 Department & Institutional Units Master</h1>
+                <h1 className="text-base font-bold text-slate-900">
+                  6.2 Department & Institutional Units Master
+                </h1>
                 <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
                   {departments.length} Units Active
                 </Chip>
@@ -136,7 +256,7 @@ export default function OrganizationMasterPage() {
               radius="sm"
               className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
               startContent={<span className="material-symbols-rounded text-sm">add</span>}
-              onPress={onAddOpen}
+              onPress={handleOpenAdd}
             >
               Add Department Unit
             </Button>
@@ -156,17 +276,14 @@ export default function OrganizationMasterPage() {
             <Select
               size="sm"
               radius="sm"
+              aria-label="Filter by Parent Formation"
               placeholder="Filter by Parent Formation"
+              items={PARENT_FORMATION_FILTER_ITEMS}
               selectedKeys={[selectedParentFilter]}
               onChange={(e) => setSelectedParentFilter(e.target.value || "ALL")}
               className="bg-slate-50"
             >
-              <SelectItem key="ALL">All Parent Formations</SelectItem>
-              <SelectItem key="State Police Headquarter">State Police Headquarter</SelectItem>
-              <SelectItem key="Recruitment Board">Recruitment Board</SelectItem>
-              <SelectItem key="Vigilance Wing">Vigilance Wing</SelectItem>
-              <SelectItem key="Director General Office">Director General Office</SelectItem>
-              <SelectItem key="Special Wing">Special Wing</SelectItem>
+              {(parent) => <SelectItem key={parent.key}>{parent.label}</SelectItem>}
             </Select>
           </div>
         </CardBody>
@@ -177,49 +294,81 @@ export default function OrganizationMasterPage() {
         <CardBody className="p-0">
           <Table removeWrapper aria-label="Department Master Table" className="min-w-full">
             <TableHeader>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">S.NO</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">DEPARTMENT / UNIT NAME</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">UNIT CODE</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">PARENT FORMATION</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">LINKED WRITS</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                S.NO
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                DEPARTMENT / UNIT NAME
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                UNIT CODE
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                PARENT FORMATION
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                HEADQUARTERS
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                LINKED WRITS
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
+                ACTION
+              </TableColumn>
             </TableHeader>
-            <TableBody items={filteredDepartments} emptyContent="No institutional units match your search.">
-              {(item) => (
-                <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                  <TableCell className="text-xs font-bold text-slate-400">{item.id}</TableCell>
-                  <TableCell className="text-xs font-bold text-slate-900">{item.name}</TableCell>
-                  <TableCell className="font-mono text-xs font-semibold text-blue-700">{item.code}</TableCell>
-                  <TableCell className="text-xs text-slate-600">{item.parent}</TableCell>
-                  <TableCell>
-                    <Chip size="sm" variant="flat" color="primary" className="text-[10px] font-bold">
-                      {item.activeCases} Writs
-                    </Chip>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        className="text-slate-400 hover:text-slate-700"
-                        onClick={() => handleOpenEdit(item)}
-                      >
-                        <span className="material-symbols-rounded text-sm">edit</span>
-                      </Button>
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        className="text-slate-400 hover:text-rose-600"
-                        onClick={() => handleOpenDelete(item)}
-                      >
-                        <span className="material-symbols-rounded text-sm">delete</span>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
+            <TableBody
+              items={filteredDepartments}
+              isLoading={loading}
+              loadingContent={
+                <div className="p-4 space-y-2">
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                </div>
+              }
+              emptyContent={!loading ? "No institutional units match your search." : " "}
+            >
+              {(item) => {
+                const index = departments.findIndex((d) => d._id === item._id) + 1;
+                return (
+                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell className="text-xs font-bold text-slate-400">{index}</TableCell>
+                    <TableCell className="text-xs font-bold text-slate-900">{item.unitName}</TableCell>
+                    <TableCell className="font-mono text-xs font-semibold text-blue-700">
+                      {item.unitCode}
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-600">{item.parentFormation}</TableCell>
+                    <TableCell className="text-xs text-slate-500">{item.headquarters || "Lucknow"}</TableCell>
+                    <TableCell>
+                      <Chip size="sm" variant="flat" color="primary" className="text-[10px] font-bold">
+                        {item.activeWritsCount || 0} Writs
+                      </Chip>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="light"
+                          className="text-slate-400 hover:text-slate-700"
+                          onClick={() => handleOpenEdit(item)}
+                        >
+                          <span className="material-symbols-rounded text-sm">edit</span>
+                        </Button>
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="light"
+                          className="text-slate-400 hover:text-rose-600"
+                          onClick={() => handleOpenDelete(item)}
+                        >
+                          <span className="material-symbols-rounded text-sm">delete</span>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              }}
             </TableBody>
           </Table>
         </CardBody>
@@ -229,58 +378,97 @@ export default function OrganizationMasterPage() {
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
-            <>
+            <form onSubmit={handleAddSubmit(onAddDepartment)}>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span className="material-symbols-rounded text-blue-700">corporate_fare</span>
                 Add Institutional Department Unit
               </ModalHeader>
               <ModalBody className="space-y-3">
-                <Input
-                  size="sm"
-                  label="Department / Unit Full Name"
-                  labelPlacement="outside"
-                  placeholder="e.g. Special Task Force (STF)"
-                  value={newDept.name}
-                  onValueChange={(v) => setNewDept({ ...newDept, name: v })}
-                  isRequired
+                <Controller
+                  name="unitName"
+                  control={addControl}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      size="sm"
+                      label="Department / Unit Full Name"
+                      labelPlacement="outside"
+                      placeholder="e.g. Special Task Force (STF)"
+                      isInvalid={!!addErrors.unitName}
+                      errorMessage={addErrors.unitName?.message}
+                      isRequired
+                    />
+                  )}
                 />
-                <Input
-                  size="sm"
-                  label="Unit Short Code"
-                  labelPlacement="outside"
-                  placeholder="e.g. STF"
-                  value={newDept.code}
-                  onValueChange={(v) => setNewDept({ ...newDept, code: v })}
+
+                <Controller
+                  name="unitCode"
+                  control={addControl}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      size="sm"
+                      label="Unit Short Code"
+                      labelPlacement="outside"
+                      placeholder="e.g. STF"
+                      isInvalid={!!addErrors.unitCode}
+                      errorMessage={addErrors.unitCode?.message}
+                      isRequired
+                    />
+                  )}
                 />
-                <Select
-                  size="sm"
-                  label="Parent Formation"
-                  labelPlacement="outside"
-                  selectedKeys={[newDept.parent]}
-                  onChange={(e) => setNewDept({ ...newDept, parent: e.target.value })}
-                  isRequired
-                >
-                  <SelectItem key="State Police Headquarter">State Police Headquarter</SelectItem>
-                  <SelectItem key="Recruitment Board">Recruitment Board</SelectItem>
-                  <SelectItem key="Vigilance Wing">Vigilance Wing</SelectItem>
-                  <SelectItem key="Director General Office">Director General Office</SelectItem>
-                  <SelectItem key="Special Wing">Special Wing</SelectItem>
-                </Select>
+
+                <Controller
+                  name="parentFormation"
+                  control={addControl}
+                  render={({ field }) => (
+                    <Select
+                      size="sm"
+                      label="Parent Formation"
+                      labelPlacement="outside"
+                      items={PARENT_FORMATIONS}
+                      selectedKeys={[field.value]}
+                      onChange={(e) => field.onChange(e.target.value)}
+                      isInvalid={!!addErrors.parentFormation}
+                      errorMessage={addErrors.parentFormation?.message}
+                      isRequired
+                    >
+                      {(parent) => <SelectItem key={parent.key}>{parent.label}</SelectItem>}
+                    </Select>
+                  )}
+                />
+
+                <Controller
+                  name="headquarters"
+                  control={addControl}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      size="sm"
+                      label="Headquarters"
+                      labelPlacement="outside"
+                      placeholder="e.g. Lucknow"
+                      isInvalid={!!addErrors.headquarters}
+                      errorMessage={addErrors.headquarters?.message}
+                    />
+                  )}
+                />
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
+                  type="submit"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  onClick={handleAdd}
+                  isLoading={isSubmitting}
                 >
                   Save Department
                 </Button>
               </ModalFooter>
-            </>
+            </form>
           )}
         </ModalContent>
       </Modal>
@@ -289,56 +477,91 @@ export default function OrganizationMasterPage() {
       <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
-            <>
+            <form onSubmit={handleEditSubmit(onSaveEdit)}>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span className="material-symbols-rounded text-blue-700">edit</span>
-                Edit Department: {editingDept?.code}
+                Edit Department: {editingDept?.unitCode}
               </ModalHeader>
               <ModalBody className="space-y-3">
-                <Input
-                  size="sm"
-                  label="Department Name"
-                  labelPlacement="outside"
-                  value={editingDept?.name || ""}
-                  onValueChange={(v) => setEditingDept({ ...editingDept, name: v })}
-                  isRequired
+                <Controller
+                  name="unitName"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      size="sm"
+                      label="Department Name"
+                      labelPlacement="outside"
+                      isInvalid={!!editErrors.unitName}
+                      errorMessage={editErrors.unitName?.message}
+                      isRequired
+                    />
+                  )}
                 />
-                <Input
-                  size="sm"
-                  label="Unit Code"
-                  labelPlacement="outside"
-                  value={editingDept?.code || ""}
-                  onValueChange={(v) => setEditingDept({ ...editingDept, code: v })}
-                  isRequired
+
+                <Controller
+                  name="unitCode"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      size="sm"
+                      label="Unit Code"
+                      labelPlacement="outside"
+                      isInvalid={!!editErrors.unitCode}
+                      errorMessage={editErrors.unitCode?.message}
+                      isRequired
+                    />
+                  )}
                 />
-                <Select
-                  size="sm"
-                  label="Parent Formation"
-                  labelPlacement="outside"
-                  selectedKeys={editingDept ? [editingDept.parent] : ["State Police Headquarter"]}
-                  onChange={(e) => setEditingDept({ ...editingDept, parent: e.target.value })}
-                >
-                  <SelectItem key="State Police Headquarter">State Police Headquarter</SelectItem>
-                  <SelectItem key="Recruitment Board">Recruitment Board</SelectItem>
-                  <SelectItem key="Vigilance Wing">Vigilance Wing</SelectItem>
-                  <SelectItem key="Director General Office">Director General Office</SelectItem>
-                  <SelectItem key="Special Wing">Special Wing</SelectItem>
-                </Select>
+
+                <Controller
+                  name="parentFormation"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Select
+                      size="sm"
+                      label="Parent Formation"
+                      labelPlacement="outside"
+                      items={PARENT_FORMATIONS}
+                      selectedKeys={[field.value]}
+                      onChange={(e) => field.onChange(e.target.value)}
+                    >
+                      {(parent) => <SelectItem key={parent.key}>{parent.label}</SelectItem>}
+                    </Select>
+                  )}
+                />
+
+                <Controller
+                  name="headquarters"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      size="sm"
+                      label="Headquarters"
+                      labelPlacement="outside"
+                      isInvalid={!!editErrors.headquarters}
+                      errorMessage={editErrors.headquarters?.message}
+                    />
+                  )}
+                />
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
+                  type="submit"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  onClick={handleSaveEdit}
+                  isLoading={isSubmitting}
                 >
                   Save Changes
                 </Button>
               </ModalFooter>
-            </>
+            </form>
           )}
         </ModalContent>
       </Modal>
@@ -353,15 +576,15 @@ export default function OrganizationMasterPage() {
                 Confirm Deletion
               </ModalHeader>
               <ModalBody className="text-xs text-slate-600">
-                Are you sure you want to remove <b>{deptToDelete?.name}</b> ({deptToDelete?.code})?
-                {deptToDelete?.activeCases > 0 && (
+                Are you sure you want to remove <b>{deptToDelete?.unitName}</b> ({deptToDelete?.unitCode})?
+                {(deptToDelete?.activeWritsCount || 0) > 0 && (
                   <p className="mt-2 text-rose-600 font-semibold">
-                    Warning: There are {deptToDelete?.activeCases} active writ petitions currently linked to this unit.
+                    Warning: There are {deptToDelete?.activeWritsCount} active writ petitions currently linked to this unit.
                   </p>
                 )}
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button

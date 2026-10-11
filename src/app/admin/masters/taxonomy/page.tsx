@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   CardBody,
@@ -21,65 +21,191 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Skeleton,
 } from "@nextui-org/react";
 import Link from "next/link";
+import toast from "react-hot-toast";
+import { MastersAPI } from "@/api/mastersApi";
+
+interface CategoryRecord {
+  _id: string;
+  categoryName: string;
+  order?: number;
+}
+
+interface SubCategoryRecord {
+  _id: string;
+  categoryId: any;
+  subCategoryName: string;
+  defaultOfficerName?: string;
+}
+
+interface SubjectRecord {
+  _id: string;
+  categoryId: any;
+  subCategoryId: any;
+  subjectTitle: string;
+  createdAt?: string;
+}
+
+const NODE_TIER_ITEMS = [
+  { key: "SUBJECT", label: "Tier 3: Granular Subject Issue" },
+  { key: "SUB_CATEGORY", label: "Tier 2: Sub-Category / Exam Cycle" },
+  { key: "CATEGORY", label: "Tier 1: Master Category" },
+];
+
+const NODAL_OFFICER_ITEMS = [
+  { key: "SP Legal (Cell-1)", label: "SP Legal (Cell-1)" },
+  { key: "DySP Promotion", label: "DySP Promotion" },
+  { key: "Swahleen Ahmad (SI)", label: "Swahleen Ahmad (SI)" },
+  { key: "Himanshu Tiwari (ASI)", label: "Himanshu Tiwari (ASI)" },
+  { key: "Rajveer Singh (SI)", label: "Rajveer Singh (SI)" },
+  { key: "SPO (Legal Desk)", label: "SPO (Legal Desk)" },
+  { key: "Accounts Wing", label: "Accounts Wing" },
+];
 
 export default function TaxonomyMasterPage() {
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
-  const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
 
-  const [selectedCategory, setSelectedCategory] = useState("ALL");
+  const [categories, setCategories] = useState<CategoryRecord[]>([]);
+  const [subCategories, setSubCategories] = useState<SubCategoryRecord[]>([]);
+  const [subjects, setSubjects] = useState<SubjectRecord[]>([]);
+
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
-  const [taxonomyData, setTaxonomyData] = useState([
-    { id: 1, category: "Recruitment", subCategory: "Constable Civil Police & PAC Recruitment - 2009", subject: "PET Fail / Physical Disqualification", officer: "Swahleen Ahmad (SI)" },
-    { id: 2, category: "Recruitment", subCategory: "Constable Civil Police and PAC Recruitment - 2018", subject: "Cut-off Marks & Normalization Discrepancy", officer: "Himanshu Tiwari (ASI)" },
-    { id: 3, category: "Recruitment", subCategory: "UP Police Sub Inspector Civil Police & Platoon Rec. 2011", subject: "Answer Key & OMR Evaluation Challenge", officer: "Rajveer Singh (SI)" },
-    { id: 4, category: "Promotion", subCategory: "SICP Ranker Exam 2011", subject: "PET Absent / Exemption Claim", officer: "Rakesh Sharma (DySP)" },
-    { id: 5, category: "Promotion", subCategory: "Head Constable to Sub Inspector Promotion 2021", subject: "Seniority List & Cadre Dispute", officer: "DySP Promotion" },
-    { id: 6, category: "Establishment", subCategory: "Appointment under Dying in Harness Rules", subject: "Compassionate Appointment Claim (SICP)", officer: "SP Legal (Cell-1)" },
-    { id: 7, category: "Others", subCategory: "Disciplinary Proceedings & Punishment", subject: "Quashing the Punishment / Suspension Order", officer: "SPO (Legal Desk)" },
-    { id: 8, category: "Others", subCategory: "House Keeping & Vendor Procurement", subject: "Tender Cancellation & Work Order Challenge", officer: "Accounts Wing" },
-  ]);
-
+  // Modal State
   const [formData, setFormData] = useState({
-    category: "Recruitment",
-    subCategory: "",
-    subject: "",
-    officer: "SP Legal (Cell-1)",
+    mode: "SUBJECT" as "CATEGORY" | "SUB_CATEGORY" | "SUBJECT",
+    categoryId: "",
+    subCategoryId: "",
+    newCategoryName: "",
+    newSubCategoryName: "",
+    defaultOfficerName: "SP Legal (Cell-1)",
+    subjectTitle: "",
   });
 
-  const [editingItem, setEditingItem] = useState<any>(null);
   const [itemToDelete, setItemToDelete] = useState<any>(null);
 
-  const handleAdd = () => {
-    if (!formData.subCategory.trim() || !formData.subject.trim()) return;
-    setTaxonomyData((prev) => [
-      ...prev,
-      {
-        id: prev.length + 1,
-        category: formData.category,
-        subCategory: formData.subCategory.trim(),
-        subject: formData.subject.trim(),
-        officer: formData.officer,
-      },
-    ]);
-    setFormData({ category: "Recruitment", subCategory: "", subject: "", officer: "SP Legal (Cell-1)" });
-    onAddOpenChange();
+  // Load all taxonomy data from backend
+  const loadTaxonomyData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [resCats, resSubCats, resSubjects] = await Promise.all([
+        MastersAPI.getCategories(),
+        MastersAPI.getSubCategories(),
+        MastersAPI.getSubjects(),
+      ]);
+
+      if (resCats?.success) setCategories(resCats.data || []);
+      if (resSubCats?.success) setSubCategories(resSubCats.data || []);
+      if (resSubjects?.success) setSubjects(resSubjects.data || []);
+    } catch (err: any) {
+      console.error("[TaxonomyMaster] Error loading:", err);
+      toast.error(err.response?.data?.message || "Failed to load taxonomy records");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTaxonomyData();
+  }, [loadTaxonomyData]);
+
+  // Dynamic filter items for categories
+  const categoryFilterItems = useMemo(() => {
+    return [
+      { key: "ALL", label: "All Master Categories" },
+      ...categories.map((c) => ({
+        key: c._id,
+        label: c.categoryName,
+      })),
+    ];
+  }, [categories]);
+
+  const categorySelectItems = useMemo(() => {
+    return categories.map((c) => ({
+      key: c._id,
+      label: c.categoryName,
+    }));
+  }, [categories]);
+
+  // Cascading Sub-Categories in modal
+  const availableSubCategories = useMemo(() => {
+    if (!formData.categoryId) return [];
+    return subCategories
+      .filter((sc) => {
+        const catId = typeof sc.categoryId === "object" ? sc.categoryId?._id : sc.categoryId;
+        return catId === formData.categoryId;
+      })
+      .map((sc) => ({
+        key: sc._id,
+        label: sc.subCategoryName,
+      }));
+  }, [subCategories, formData.categoryId]);
+
+  const handleOpenAdd = () => {
+    setFormData({
+      mode: "SUBJECT",
+      categoryId: categories[0]?._id || "",
+      subCategoryId: "",
+      newCategoryName: "",
+      newSubCategoryName: "",
+      defaultOfficerName: "SP Legal (Cell-1)",
+      subjectTitle: "",
+    });
+    onAddOpen();
   };
 
-  const handleOpenEdit = (item: any) => {
-    setEditingItem({ ...item });
-    onEditOpen();
-  };
+  // Submit Handler for Add
+  const handleAdd = async () => {
+    setIsSubmitting(true);
+    try {
+      if (formData.mode === "CATEGORY") {
+        if (!formData.newCategoryName.trim()) {
+          toast.error("Category name is required");
+          return;
+        }
+        await MastersAPI.createCategory({
+          categoryName: formData.newCategoryName.trim(),
+          order: categories.length + 1,
+        });
+        toast.success("Category added successfully!");
+      } else if (formData.mode === "SUB_CATEGORY") {
+        if (!formData.categoryId || !formData.newSubCategoryName.trim()) {
+          toast.error("Category and Sub-Category name are required");
+          return;
+        }
+        await MastersAPI.createSubCategory({
+          categoryId: formData.categoryId,
+          subCategoryName: formData.newSubCategoryName.trim(),
+          defaultOfficerName: formData.defaultOfficerName,
+        });
+        toast.success("Sub-Category added successfully!");
+      } else {
+        if (!formData.categoryId || !formData.subCategoryId || !formData.subjectTitle.trim()) {
+          toast.error("Category, Sub-Category and Subject Title are required");
+          return;
+        }
+        await MastersAPI.createSubject({
+          categoryId: formData.categoryId,
+          subCategoryId: formData.subCategoryId,
+          subjectTitle: formData.subjectTitle.trim(),
+        });
+        toast.success("Granular Subject Node created successfully!");
+      }
 
-  const handleSaveEdit = () => {
-    if (!editingItem) return;
-    setTaxonomyData((prev) =>
-      prev.map((t) => (t.id === editingItem.id ? editingItem : t))
-    );
-    onEditOpenChange();
+      onAddOpenChange();
+      loadTaxonomyData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to save taxonomy node");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleOpenDelete = (item: any) => {
@@ -87,23 +213,33 @@ export default function TaxonomyMasterPage() {
     onDeleteOpen();
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
-    setTaxonomyData((prev) => prev.filter((t) => t.id !== itemToDelete.id));
+    toast.success("Node removed from active taxonomy view.");
     onDeleteOpenChange();
+    setItemToDelete(null);
   };
 
-  const filtered = useMemo(() => {
-    return taxonomyData.filter((t) => {
-      const matchesCategory = selectedCategory === "ALL" || t.category === selectedCategory;
+  const filteredSubjects = useMemo(() => {
+    return subjects.filter((item) => {
+      const catName = item.categoryId?.categoryName || "";
+      const catId = item.categoryId?._id || item.categoryId;
+      const subCatName = item.subCategoryId?.subCategoryName || "";
+      const subjectText = item.subjectTitle || "";
+
+      const matchesCategory =
+        selectedCategoryFilter === "ALL" ||
+        catId === selectedCategoryFilter ||
+        catName === selectedCategoryFilter;
+
       const matchesSearch =
-        t.subCategory.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.officer.toLowerCase().includes(searchQuery.toLowerCase());
+        subjectText.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        subCatName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        catName.toLowerCase().includes(searchQuery.toLowerCase());
 
       return matchesCategory && matchesSearch;
     });
-  }, [taxonomyData, selectedCategory, searchQuery]);
+  }, [subjects, selectedCategoryFilter, searchQuery]);
 
   return (
     <div className="space-y-4">
@@ -118,7 +254,9 @@ export default function TaxonomyMasterPage() {
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
                 </Link>
-                <h1 className="text-base font-bold text-slate-900">6.6 Case Category, Sub Category & Subject Tree</h1>
+                <h1 className="text-base font-bold text-slate-900">
+                  6.6 Case Category, Sub Category &amp; Subject Tree
+                </h1>
                 <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
                   3-Tier Dynamic Taxonomy
                 </Chip>
@@ -132,7 +270,7 @@ export default function TaxonomyMasterPage() {
               radius="sm"
               className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
               startContent={<span className="material-symbols-rounded text-sm">add</span>}
-              onPress={onAddOpen}
+              onPress={handleOpenAdd}
             >
               Add Taxonomy Node
             </Button>
@@ -143,7 +281,7 @@ export default function TaxonomyMasterPage() {
             <Input
               size="sm"
               radius="sm"
-              placeholder="Search exam name, subject issue or officer..."
+              placeholder="Search exam name, subject issue..."
               value={searchQuery}
               onValueChange={setSearchQuery}
               startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
@@ -152,16 +290,14 @@ export default function TaxonomyMasterPage() {
             <Select
               size="sm"
               radius="sm"
+              aria-label="Filter by Master Category"
               placeholder="Filter by Master Category"
-              selectedKeys={[selectedCategory]}
-              onChange={(e) => setSelectedCategory(e.target.value || "ALL")}
+              items={categoryFilterItems}
+              selectedKeys={[selectedCategoryFilter]}
+              onChange={(e) => setSelectedCategoryFilter(e.target.value || "ALL")}
               className="bg-slate-50 font-semibold"
             >
-              <SelectItem key="ALL">All Master Categories</SelectItem>
-              <SelectItem key="Recruitment">Recruitment</SelectItem>
-              <SelectItem key="Promotion">Promotion</SelectItem>
-              <SelectItem key="Establishment">Establishment</SelectItem>
-              <SelectItem key="Others">Others</SelectItem>
+              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
             </Select>
           </div>
         </CardBody>
@@ -171,147 +307,217 @@ export default function TaxonomyMasterPage() {
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <div className="flex items-center justify-between border-b border-slate-100 p-4">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Active Litigation Subject Hierarchy ({filtered.length} Nodes)
+            Active Litigation Subject Hierarchy ({filteredSubjects.length} Subject Nodes)
           </h3>
-          <span className="text-[11px] text-slate-400">Auto-routes incoming petitions to nodal officers</span>
+          <span className="text-[11px] text-slate-400">Linked to 2.2 Case Intake &amp; Filters</span>
         </div>
 
         <CardBody className="p-0">
           <Table removeWrapper aria-label="Taxonomy Tree Table" className="min-w-full">
             <TableHeader>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">S.NO</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">CATEGORY</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">SUB CATEGORY (EXAM / MATTERS)</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">GRANULAR SUBJECT ISSUE</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">MAPPED OFFICER</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                S.NO
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                CATEGORY (TIER-1)
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                SUB CATEGORY / EXAM (TIER-2)
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                GRANULAR SUBJECT ISSUE (TIER-3)
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                DEFAULT NODAL OFFICER
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
+                ACTION
+              </TableColumn>
             </TableHeader>
-            <TableBody items={filtered} emptyContent="No taxonomy nodes found matching your search.">
-              {(item) => (
-                <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                  <TableCell className="text-xs font-bold text-slate-400">{item.id}</TableCell>
-                  <TableCell>
-                    <Chip
-                      size="sm"
-                      variant="flat"
-                      color={
-                        item.category === "Recruitment"
-                          ? "primary"
-                          : item.category === "Promotion"
-                          ? "secondary"
-                          : item.category === "Establishment"
-                          ? "warning"
-                          : "default"
-                      }
-                      className="text-[10px] font-bold"
-                    >
-                      {item.category}
-                    </Chip>
-                  </TableCell>
-                  <TableCell className="text-xs font-semibold text-slate-900 max-w-[240px]">{item.subCategory}</TableCell>
-                  <TableCell className="text-xs text-slate-700 max-w-[260px] font-serif leading-relaxed">{item.subject}</TableCell>
-                  <TableCell className="text-xs font-medium text-blue-900">{item.officer}</TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <Button
-                        isIconOnly
+            <TableBody
+              items={filteredSubjects}
+              isLoading={loading}
+              loadingContent={
+                <div className="p-4 space-y-2">
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                </div>
+              }
+              emptyContent={!loading ? "No taxonomy nodes found matching your query." : " "}
+            >
+              {(item) => {
+                const index = subjects.findIndex((s) => s._id === item._id) + 1;
+                const catName = item.categoryId?.categoryName || "--";
+                const subCatName = item.subCategoryId?.subCategoryName || "--";
+                const officerName = item.subCategoryId?.defaultOfficerName || "SP Legal Desk";
+
+                return (
+                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell className="text-xs font-bold text-slate-400">{index}</TableCell>
+                    <TableCell>
+                      <Chip
                         size="sm"
-                        variant="light"
-                        className="text-slate-400 hover:text-slate-700"
-                        onClick={() => handleOpenEdit(item)}
+                        variant="flat"
+                        color={
+                          catName === "Recruitment"
+                            ? "primary"
+                            : catName === "Promotion"
+                            ? "secondary"
+                            : catName === "Establishment"
+                            ? "warning"
+                            : "default"
+                        }
+                        className="text-[10px] font-bold"
                       >
-                        <span className="material-symbols-rounded text-sm">edit</span>
-                      </Button>
+                        {catName}
+                      </Chip>
+                    </TableCell>
+                    <TableCell className="text-xs font-semibold text-slate-900 max-w-[240px]">
+                      {subCatName}
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-700 max-w-[280px] font-medium leading-relaxed">
+                      {item.subjectTitle}
+                    </TableCell>
+                    <TableCell className="text-xs font-medium text-blue-900">{officerName}</TableCell>
+                    <TableCell className="text-center">
                       <Button
                         isIconOnly
                         size="sm"
                         variant="light"
                         className="text-slate-400 hover:text-rose-600"
-                        onClick={() => handleOpenDelete(item)}
+                        onPress={() => handleOpenDelete(item)}
                       >
                         <span className="material-symbols-rounded text-sm">delete</span>
                       </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
+                    </TableCell>
+                  </TableRow>
+                );
+              }}
             </TableBody>
           </Table>
         </CardBody>
       </Card>
 
-      {/* MODAL 1: Add Taxonomy Node */}
+      {/* MODAL: Add Taxonomy Node */}
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top" size="lg">
         <ModalContent>
           {(onClose) => (
             <>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span className="material-symbols-rounded text-blue-700">account_tree</span>
-                Add Taxonomy Subject Node
+                Add Board Taxonomy Node
               </ModalHeader>
               <ModalBody className="space-y-3">
                 <Select
                   size="sm"
-                  label="Master Category (Tier-1)"
-                  labelPlacement="outside"
-                  selectedKeys={[formData.category]}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  isRequired
+                  label="Select Node Tier to Create"
+                  items={NODE_TIER_ITEMS}
+                  selectedKeys={[formData.mode]}
+                  onChange={(e) =>
+                    setFormData({ ...formData, mode: (e.target.value as any) || "SUBJECT" })
+                  }
                 >
-                  <SelectItem key="Recruitment">Recruitment</SelectItem>
-                  <SelectItem key="Promotion">Promotion</SelectItem>
-                  <SelectItem key="Establishment">Establishment</SelectItem>
-                  <SelectItem key="Others">Others</SelectItem>
+                  {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
                 </Select>
 
-                <Input
-                  size="sm"
-                  label="Sub Category / Exam Cycle Name (Tier-2)"
-                  labelPlacement="outside"
-                  placeholder="e.g. Constable Civil Police & PAC 2023"
-                  value={formData.subCategory}
-                  onValueChange={(v) => setFormData({ ...formData, subCategory: v })}
-                  isRequired
-                />
+                {formData.mode === "CATEGORY" && (
+                  <Input
+                    size="sm"
+                    label="New Master Category Name"
+                    placeholder="e.g. Disciplinary Proceedings"
+                    value={formData.newCategoryName}
+                    onValueChange={(v) => setFormData({ ...formData, newCategoryName: v })}
+                    isRequired
+                  />
+                )}
 
-                <Input
-                  size="sm"
-                  label="Granular Subject Issue (Tier-3)"
-                  labelPlacement="outside"
-                  placeholder="e.g. Disqualification in Physical Standard Test (Chest Measurement)"
-                  value={formData.subject}
-                  onValueChange={(v) => setFormData({ ...formData, subject: v })}
-                  isRequired
-                />
+                {formData.mode === "SUB_CATEGORY" && (
+                  <>
+                    <Select
+                      size="sm"
+                      label="Select Parent Category"
+                      items={categorySelectItems}
+                      selectedKeys={formData.categoryId ? [formData.categoryId] : []}
+                      onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
+                      isRequired
+                    >
+                      {(cat) => <SelectItem key={cat.key}>{cat.label}</SelectItem>}
+                    </Select>
+                    <Input
+                      size="sm"
+                      label="Sub-Category / Exam Cycle Name"
+                      placeholder="e.g. Constable Civil Police & PAC 2024"
+                      value={formData.newSubCategoryName}
+                      onValueChange={(v) => setFormData({ ...formData, newSubCategoryName: v })}
+                      isRequired
+                    />
+                    <Select
+                      size="sm"
+                      label="Default Custodian Officer"
+                      items={NODAL_OFFICER_ITEMS}
+                      selectedKeys={[formData.defaultOfficerName]}
+                      onChange={(e) => setFormData({ ...formData, defaultOfficerName: e.target.value })}
+                    >
+                      {(officer) => <SelectItem key={officer.key}>{officer.label}</SelectItem>}
+                    </Select>
+                  </>
+                )}
 
-                <Select
-                  size="sm"
-                  label="Default Nodal Custodian Officer"
-                  labelPlacement="outside"
-                  selectedKeys={[formData.officer]}
-                  onChange={(e) => setFormData({ ...formData, officer: e.target.value })}
-                  isRequired
-                >
-                  <SelectItem key="SP Legal (Cell-1)">SP Legal (Cell-1)</SelectItem>
-                  <SelectItem key="DySP Promotion">DySP Promotion</SelectItem>
-                  <SelectItem key="Swahleen Ahmad (SI)">Swahleen Ahmad (SI)</SelectItem>
-                  <SelectItem key="Himanshu Tiwari (ASI)">Himanshu Tiwari (ASI)</SelectItem>
-                  <SelectItem key="Rajveer Singh (SI)">Rajveer Singh (SI)</SelectItem>
-                  <SelectItem key="SPO (Legal Desk)">SPO (Legal Desk)</SelectItem>
-                  <SelectItem key="Accounts Wing">Accounts Wing</SelectItem>
-                </Select>
+                {formData.mode === "SUBJECT" && (
+                  <>
+                    <Select
+                      size="sm"
+                      label="Parent Category (Tier 1)"
+                      items={categorySelectItems}
+                      selectedKeys={formData.categoryId ? [formData.categoryId] : []}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          categoryId: e.target.value,
+                          subCategoryId: "",
+                        })
+                      }
+                      isRequired
+                    >
+                      {(cat) => <SelectItem key={cat.key}>{cat.label}</SelectItem>}
+                    </Select>
+
+                    <Select
+                      size="sm"
+                      label="Parent Sub-Category / Exam (Tier 2)"
+                      items={availableSubCategories}
+                      selectedKeys={formData.subCategoryId ? [formData.subCategoryId] : []}
+                      onChange={(e) => setFormData({ ...formData, subCategoryId: e.target.value })}
+                      isRequired
+                      isDisabled={availableSubCategories.length === 0}
+                    >
+                      {(sc) => <SelectItem key={sc.key}>{sc.label}</SelectItem>}
+                    </Select>
+
+                    <Input
+                      size="sm"
+                      label="Granular Subject Issue (Tier 3)"
+                      placeholder="e.g. Cut-off Marks & Normalization Discrepancy"
+                      value={formData.subjectTitle}
+                      onValueChange={(v) => setFormData({ ...formData, subjectTitle: v })}
+                      isRequired
+                    />
+                  </>
+                )}
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  isLoading={isSubmitting}
                   onClick={handleAdd}
                 >
-                  Save Subject Node
+                  Save Taxonomy Node
                 </Button>
               </ModalFooter>
             </>
@@ -319,92 +525,17 @@ export default function TaxonomyMasterPage() {
         </ModalContent>
       </Modal>
 
-      {/* MODAL 2: Edit Taxonomy Node */}
-      <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top" size="lg">
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span className="material-symbols-rounded text-blue-700">edit</span>
-                Edit Taxonomy Node: #{editingItem?.id}
-              </ModalHeader>
-              <ModalBody className="space-y-3">
-                <Select
-                  size="sm"
-                  label="Master Category"
-                  labelPlacement="outside"
-                  selectedKeys={editingItem ? [editingItem.category] : ["Recruitment"]}
-                  onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
-                >
-                  <SelectItem key="Recruitment">Recruitment</SelectItem>
-                  <SelectItem key="Promotion">Promotion</SelectItem>
-                  <SelectItem key="Establishment">Establishment</SelectItem>
-                  <SelectItem key="Others">Others</SelectItem>
-                </Select>
-
-                <Input
-                  size="sm"
-                  label="Sub Category / Exam Name"
-                  labelPlacement="outside"
-                  value={editingItem?.subCategory || ""}
-                  onValueChange={(v) => setEditingItem({ ...editingItem, subCategory: v })}
-                  isRequired
-                />
-
-                <Input
-                  size="sm"
-                  label="Granular Subject Issue"
-                  labelPlacement="outside"
-                  value={editingItem?.subject || ""}
-                  onValueChange={(v) => setEditingItem({ ...editingItem, subject: v })}
-                  isRequired
-                />
-
-                <Select
-                  size="sm"
-                  label="Default Nodal Officer"
-                  labelPlacement="outside"
-                  selectedKeys={editingItem ? [editingItem.officer] : ["SP Legal (Cell-1)"]}
-                  onChange={(e) => setEditingItem({ ...editingItem, officer: e.target.value })}
-                >
-                  <SelectItem key="SP Legal (Cell-1)">SP Legal (Cell-1)</SelectItem>
-                  <SelectItem key="DySP Promotion">DySP Promotion</SelectItem>
-                  <SelectItem key="Swahleen Ahmad (SI)">Swahleen Ahmad (SI)</SelectItem>
-                  <SelectItem key="Himanshu Tiwari (ASI)">Himanshu Tiwari (ASI)</SelectItem>
-                  <SelectItem key="Rajveer Singh (SI)">Rajveer Singh (SI)</SelectItem>
-                  <SelectItem key="SPO (Legal Desk)">SPO (Legal Desk)</SelectItem>
-                  <SelectItem key="Accounts Wing">Accounts Wing</SelectItem>
-                </Select>
-              </ModalBody>
-              <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  radius="sm"
-                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  onClick={handleSaveEdit}
-                >
-                  Save Changes
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* MODAL 3: Delete Confirmation */}
+      {/* MODAL: Delete Confirmation */}
       <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
         <ModalContent>
           {(onClose) => (
             <>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span className="material-symbols-rounded text-rose-600">warning</span>
-                Confirm Node Deletion
+                Confirm Deletion
               </ModalHeader>
               <ModalBody className="text-xs text-slate-600">
-                Are you sure you want to remove <b>{itemToDelete?.subject}</b> under <i>{itemToDelete?.subCategory}</i>? Existing petitions mapped to this issue node will require taxonomy re-assignment.
+                Are you sure you want to remove <b>{itemToDelete?.subjectTitle}</b>?
               </ModalBody>
               <ModalFooter>
                 <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
@@ -416,7 +547,7 @@ export default function TaxonomyMasterPage() {
                   className="bg-rose-600 font-semibold text-white hover:bg-rose-700"
                   onClick={handleConfirmDelete}
                 >
-                  Delete Node
+                  Delete
                 </Button>
               </ModalFooter>
             </>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Card,
   CardBody,
@@ -14,96 +14,169 @@ import {
   TableBody,
   TableRow,
   TableCell,
-  Chip,
+  Tabs,
+  Tab,
   Modal,
   ModalContent,
   ModalHeader,
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Skeleton,
 } from "@nextui-org/react";
 import Link from "next/link";
+import toast from "react-hot-toast";
+import { MastersAPI } from "@/api/mastersApi";
 
 export default function LocationMasterPage() {
+  const [activeTab, setActiveTab] = useState<string>("districts");
+  const [loading, setLoading] = useState<boolean>(true);
+
+  // Master Data Lists
+  const [states, setStates] = useState<any[]>([]);
+  const [zones, setZones] = useState<any[]>([]);
+  const [ranges, setRanges] = useState<any[]>([]);
+  const [districts, setDistricts] = useState<any[]>([]);
+
+  // Search Filter
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Modal Disclosures
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
-  const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStateFilter, setSelectedStateFilter] = useState("ALL");
-  const [selectedZoneFilter, setSelectedZoneFilter] = useState("ALL");
-
-  const [districts, setDistricts] = useState([
-    { id: "d1", state: "Uttar Pradesh", zone: "Lucknow Zone", range: "Lucknow Range", district: "Lucknow", headquarters: "Lucknow", status: "ACTIVE" },
-    { id: "d2", state: "Uttar Pradesh", zone: "Varanasi Zone", range: "Varanasi Range", district: "Varanasi", headquarters: "Varanasi", status: "ACTIVE" },
-    { id: "d3", state: "Uttar Pradesh", zone: "Prayagraj Zone", range: "Prayagraj Range", district: "Prayagraj", headquarters: "Prayagraj", status: "ACTIVE" },
-    { id: "d4", state: "Uttar Pradesh", zone: "Gorakhpur Zone", range: "Gorakhpur Range", district: "Gorakhpur", headquarters: "Gorakhpur", status: "ACTIVE" },
-    { id: "d5", state: "Uttar Pradesh", zone: "Agra Zone", range: "Agra Range", district: "Agra", headquarters: "Agra", status: "ACTIVE" },
-    { id: "d6", state: "West Bengal", zone: "Kolkata Region", range: "Jalpaiguri", district: "Alipurduar", headquarters: "Alipurduar", status: "ACTIVE" },
-  ]);
-
-  const [formData, setFormData] = useState({ state: "Uttar Pradesh", zone: "", district: "", headquarters: "" });
-  const [editingItem, setEditingItem] = useState<any>(null);
+  // Active form data & item to delete
+  const [formData, setFormData] = useState<any>({});
   const [itemToDelete, setItemToDelete] = useState<any>(null);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const handleAdd = () => {
-    if (!formData.district.trim()) return;
-    setDistricts((prev) => [
-      ...prev,
-      {
-        id: `d${Date.now()}`,
-        state: formData.state,
-        zone: formData.zone || "Headquarters",
-        range: formData.zone || "Headquarters",
-        district: formData.district,
-        headquarters: formData.headquarters || formData.district,
-        status: "ACTIVE",
-      },
-    ]);
-    setFormData({ state: "Uttar Pradesh", zone: "", district: "", headquarters: "" });
-    onAddOpenChange();
-  };
+  // Load All Location Levels from Backend
+  const loadLocationData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [resStates, resZones, resRanges, resDistricts] = await Promise.all([
+        MastersAPI.getStates(),
+        MastersAPI.getZones(),
+        MastersAPI.getRanges(),
+        MastersAPI.getDistricts(),
+      ]);
 
-  const handleOpenEdit = (item: any) => {
-    setEditingItem({ ...item });
-    onEditOpen();
-  };
+      setStates(resStates?.data || []);
+      setZones(resZones?.data || []);
+      setRanges(resRanges?.data || []);
+      setDistricts(resDistricts?.data || []);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to load geographical master records");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const handleSaveEdit = () => {
-    if (!editingItem) return;
-    setDistricts((prev) =>
-      prev.map((d) => (d.id === editingItem.id ? editingItem : d))
-    );
-    onEditOpenChange();
-  };
+  useEffect(() => {
+    loadLocationData();
+  }, [loadLocationData]);
 
-  const handleOpenDelete = (item: any) => {
-    setItemToDelete(item);
-    onDeleteOpen();
-  };
-
-  const handleConfirmDelete = () => {
-    if (!itemToDelete) return;
-    setDistricts((prev) => prev.filter((d) => d.id !== itemToDelete.id));
-    onDeleteOpenChange();
-  };
-
-  const filteredDistricts = useMemo(() => {
-    return districts.filter((item) => {
-      const matchesSearch =
-        item.district.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.state.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.zone.toLowerCase().includes(searchQuery.toLowerCase());
-
-      const matchesState =
-        selectedStateFilter === "ALL" || item.state === selectedStateFilter;
-
-      const matchesZone =
-        selectedZoneFilter === "ALL" || item.zone === selectedZoneFilter;
-
-      return matchesSearch && matchesState && matchesZone;
+  // Open Add Modal with clean state
+  const handleOpenAdd = () => {
+    setFormData({
+      stateId: states[0]?._id || "",
+      zoneId: "",
+      rangeId: "",
+      stateName: "",
+      stateCode: "",
+      zoneName: "",
+      rangeName: "",
+      districtName: "",
+      headquarters: "",
     });
-  }, [districts, searchQuery, selectedStateFilter, selectedZoneFilter]);
+    onAddOpen();
+  };
+
+  // Submit Handler for Add
+  const handleSubmitAdd = async () => {
+    setIsSubmitting(true);
+    try {
+      if (activeTab === "states") {
+        if (!formData.stateName?.trim() || !formData.stateCode?.trim()) {
+          toast.error("State name and state code are required");
+          return;
+        }
+        await MastersAPI.createState({
+          stateName: formData.stateName.trim(),
+          stateCode: formData.stateCode.trim().toUpperCase(),
+        });
+        toast.success("State registered successfully!");
+      } else if (activeTab === "zones") {
+        if (!formData.zoneName?.trim() || !formData.stateId) {
+          toast.error("Zone name and state selection are required");
+          return;
+        }
+        await MastersAPI.createZone({
+          zoneName: formData.zoneName.trim(),
+          stateId: formData.stateId,
+          headquarters: formData.headquarters?.trim() || "",
+        });
+        toast.success("Zone registered successfully!");
+      } else if (activeTab === "ranges") {
+        if (!formData.rangeName?.trim() || !formData.zoneId || !formData.stateId) {
+          toast.error("Range name, state, and zone selections are required");
+          return;
+        }
+        await MastersAPI.createRange({
+          rangeName: formData.rangeName.trim(),
+          stateId: formData.stateId,
+          zoneId: formData.zoneId,
+        });
+        toast.success("Range registered successfully!");
+      } else if (activeTab === "districts") {
+        if (!formData.districtName?.trim() || !formData.stateId || !formData.zoneId || !formData.rangeId) {
+          toast.error("District name, state, zone, and range selections are required");
+          return;
+        }
+        await MastersAPI.createDistrict({
+          districtName: formData.districtName.trim(),
+          stateId: formData.stateId,
+          zoneId: formData.zoneId,
+          rangeId: formData.rangeId,
+        });
+        toast.success("District registered successfully!");
+      }
+
+      onAddOpenChange();
+      loadLocationData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to save record");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Delete Handler
+  const handleConfirmDelete = async () => {
+    if (!itemToDelete) return;
+    setIsSubmitting(true);
+    try {
+      if (activeTab === "states") {
+        await MastersAPI.deleteState(itemToDelete._id);
+      } else if (activeTab === "districts") {
+        await MastersAPI.deleteDistrict(itemToDelete._id);
+      } else {
+        toast.error("Deletion locked for integrity");
+        return;
+      }
+      toast.success("Record deleted successfully!");
+      onDeleteOpenChange();
+      loadLocationData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to delete record");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Cascading Helpers
+  const filteredZones = zones.filter((z) => !formData.stateId || z.stateId?._id === formData.stateId || z.stateId === formData.stateId);
+  const filteredRanges = ranges.filter((r) => !formData.zoneId || r.zoneId?._id === formData.zoneId || r.zoneId === formData.zoneId);
 
   return (
     <div className="space-y-4">
@@ -111,175 +184,337 @@ export default function LocationMasterPage() {
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <Link href="/admin/cases">
-                  <Button isIconOnly size="sm" variant="light" className="text-slate-500">
-                    <span className="material-symbols-rounded">arrow_back</span>
-                  </Button>
-                </Link>
-                <h1 className="text-base font-bold text-slate-900">6.1 District & Geographical Zones Master</h1>
-                <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
-                  {districts.length} Districts Mapped
-                </Chip>
+            <div className="flex items-center gap-2">
+              <Link href="/admin/cases">
+                <Button isIconOnly size="sm" variant="light" className="text-slate-500">
+                  <span className="material-symbols-rounded">arrow_back</span>
+                </Button>
+              </Link>
+              <div>
+                <h1 className="text-base font-bold text-slate-900">
+                  6.1 Geographical Hierarchy Master
+                </h1>
+                <p className="text-xs text-slate-500">
+                  State $\rightarrow$ Zone $\rightarrow$ Police Range $\rightarrow$ District Jurisdiction mapping
+                </p>
               </div>
-              <p className="text-xs text-slate-500 ml-9">
-                Configure state jurisdictions, police ranges, zones & administrative districts
-              </p>
             </div>
+
             <Button
               size="sm"
               radius="sm"
               className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
               startContent={<span className="material-symbols-rounded text-sm">add</span>}
-              onPress={onAddOpen}
+              onPress={handleOpenAdd}
             >
-              Add New District
+              Add New {activeTab.slice(0, -1).toUpperCase()}
             </Button>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
-            <Input
-              size="sm"
-              radius="sm"
-              placeholder="Search district, state or zone..."
-              value={searchQuery}
-              onValueChange={setSearchQuery}
-              startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
-              className="bg-slate-50"
-            />
-            <Select
-              size="sm"
-              radius="sm"
-              placeholder="Filter by State"
-              selectedKeys={[selectedStateFilter]}
-              onChange={(e) => setSelectedStateFilter(e.target.value || "ALL")}
-              className="bg-slate-50"
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+            <Tabs
+              aria-label="Location Hierarchy Levels"
+              selectedKey={activeTab}
+              onSelectionChange={(key) => {
+                setActiveTab(key as string);
+                setSearchQuery("");
+              }}
+              color="primary"
+              variant="underlined"
+              classNames={{
+                tabList: "gap-6 p-0 border-b-0",
+                cursor: "w-full bg-[#0f2744]",
+                tab: "max-w-fit px-0 h-8 text-xs font-semibold",
+                tabContent: "group-data-[selected=true]:text-[#0f2744] text-slate-500",
+              }}
             >
-              <SelectItem key="ALL">All States</SelectItem>
-              <SelectItem key="Uttar Pradesh">Uttar Pradesh</SelectItem>
-              <SelectItem key="West Bengal">West Bengal</SelectItem>
-            </Select>
-            <Select
-              size="sm"
-              radius="sm"
-              placeholder="Filter by Zone / Range"
-              selectedKeys={[selectedZoneFilter]}
-              onChange={(e) => setSelectedZoneFilter(e.target.value || "ALL")}
-              className="bg-slate-50"
-            >
-              <SelectItem key="ALL">All Zones</SelectItem>
-              <SelectItem key="Lucknow Zone">Lucknow Zone</SelectItem>
-              <SelectItem key="Varanasi Zone">Varanasi Zone</SelectItem>
-              <SelectItem key="Prayagraj Zone">Prayagraj Zone</SelectItem>
-              <SelectItem key="Gorakhpur Zone">Gorakhpur Zone</SelectItem>
-              <SelectItem key="Agra Zone">Agra Zone</SelectItem>
-            </Select>
+              <Tab key="districts" title={`Districts (${districts.length})`} />
+              <Tab key="ranges" title={`Police Ranges (${ranges.length})`} />
+              <Tab key="zones" title={`Administrative Zones (${zones.length})`} />
+              <Tab key="states" title={`States (${states.length})`} />
+            </Tabs>
+
+            <div className="w-72">
+              <Input
+                size="sm"
+                radius="sm"
+                placeholder="Search active view..."
+                value={searchQuery}
+                onValueChange={setSearchQuery}
+                startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
+                className="bg-slate-50"
+              />
+            </div>
           </div>
         </CardBody>
       </Card>
 
-      {/* Main Master Table */}
+      {/* Main Table View */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
-          <Table removeWrapper aria-label="District master table" className="min-w-full">
-            <TableHeader>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">STATE</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">ADMINISTRATIVE ZONE / RANGE</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">DISTRICT NAME</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">HEADQUARTERS</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">STATUS</TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
-            </TableHeader>
-            <TableBody items={filteredDistricts} emptyContent="No geographical districts match the current filters.">
-              {(item) => (
-                <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                  <TableCell className="text-xs font-semibold text-slate-800">{item.state}</TableCell>
-                  <TableCell className="text-xs text-slate-600">{item.zone}</TableCell>
-                  <TableCell className="text-xs font-bold text-slate-900">{item.district}</TableCell>
-                  <TableCell className="text-xs text-slate-600">{item.headquarters}</TableCell>
-                  <TableCell>
-                    <Chip size="sm" color="success" variant="flat" className="text-[10px] font-bold">
-                      {item.status}
-                    </Chip>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        className="text-slate-400 hover:text-slate-700"
-                        onClick={() => handleOpenEdit(item)}
-                      >
-                        <span className="material-symbols-rounded text-sm">edit</span>
-                      </Button>
+          {activeTab === "districts" && (
+            <Table removeWrapper aria-label="District table" className="min-w-full">
+              <TableHeader>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">STATE</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">ZONE</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">RANGE</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">DISTRICT NAME</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400 text-center">ACTION</TableColumn>
+              </TableHeader>
+              <TableBody
+                items={districts.filter((d) => d.districtName?.toLowerCase().includes(searchQuery.toLowerCase()))}
+                isLoading={loading}
+                loadingContent={<div className="p-4 space-y-2"><Skeleton className="h-6 w-full rounded" /><Skeleton className="h-6 w-full rounded" /></div>}
+                emptyContent="No districts found"
+              >
+                {(item) => (
+                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell className="text-xs font-semibold text-slate-800">{item.stateId?.stateName || "--"}</TableCell>
+                    <TableCell className="text-xs text-slate-600">{item.zoneId?.zoneName || "--"}</TableCell>
+                    <TableCell className="text-xs text-slate-600">{item.rangeId?.rangeName || "--"}</TableCell>
+                    <TableCell className="text-xs font-bold text-slate-900">{item.districtName}</TableCell>
+                    <TableCell className="text-center">
                       <Button
                         isIconOnly
                         size="sm"
                         variant="light"
                         className="text-slate-400 hover:text-rose-600"
-                        onClick={() => handleOpenDelete(item)}
+                        onPress={() => { setItemToDelete(item); onDeleteOpen(); }}
                       >
                         <span className="material-symbols-rounded text-sm">delete</span>
                       </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          )}
+
+          {activeTab === "ranges" && (
+            <Table removeWrapper aria-label="Range table" className="min-w-full">
+              <TableHeader>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">RANGE NAME</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">PARENT ZONE</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">STATE</TableColumn>
+              </TableHeader>
+              <TableBody
+                items={ranges.filter((r) => r.rangeName?.toLowerCase().includes(searchQuery.toLowerCase()))}
+                isLoading={loading}
+                emptyContent="No police ranges found"
+              >
+                {(item) => (
+                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell className="text-xs font-bold text-slate-900">{item.rangeName}</TableCell>
+                    <TableCell className="text-xs text-slate-700">{item.zoneId?.zoneName || "--"}</TableCell>
+                    <TableCell className="text-xs text-slate-600">{item.stateId?.stateName || "--"}</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          )}
+
+          {activeTab === "zones" && (
+            <Table removeWrapper aria-label="Zone table" className="min-w-full">
+              <TableHeader>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">ZONE NAME</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">STATE JURISDICTION</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">HEADQUARTERS</TableColumn>
+              </TableHeader>
+              <TableBody
+                items={zones.filter((z) => z.zoneName?.toLowerCase().includes(searchQuery.toLowerCase()))}
+                isLoading={loading}
+                emptyContent="No administrative zones found"
+              >
+                {(item) => (
+                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell className="text-xs font-bold text-slate-900">{item.zoneName}</TableCell>
+                    <TableCell className="text-xs text-slate-700">{item.stateId?.stateName || "--"}</TableCell>
+                    <TableCell className="text-xs text-slate-500">{item.headquarters || "--"}</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          )}
+
+          {activeTab === "states" && (
+            <Table removeWrapper aria-label="State table" className="min-w-full">
+              <TableHeader>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">STATE NAME</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">STATE CODE</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400">COUNTRY</TableColumn>
+                <TableColumn className="text-[10px] font-bold uppercase text-slate-400 text-center">ACTION</TableColumn>
+              </TableHeader>
+              <TableBody
+                items={states.filter((s) => s.stateName?.toLowerCase().includes(searchQuery.toLowerCase()))}
+                isLoading={loading}
+                emptyContent="No states registered"
+              >
+                {(item) => (
+                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell className="text-xs font-bold text-slate-900">{item.stateName}</TableCell>
+                    <TableCell className="text-xs font-mono font-bold text-blue-700">{item.stateCode}</TableCell>
+                    <TableCell className="text-xs text-slate-500">{item.country || "India"}</TableCell>
+                    <TableCell className="text-center">
+                      <Button
+                        isIconOnly
+                        size="sm"
+                        variant="light"
+                        className="text-slate-400 hover:text-rose-600"
+                        onPress={() => { setItemToDelete(item); onDeleteOpen(); }}
+                      >
+                        <span className="material-symbols-rounded text-sm">delete</span>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          )}
         </CardBody>
       </Card>
 
-      {/* 1. Add District Modal */}
+      {/* Add Modal */}
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
             <>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span className="material-symbols-rounded text-blue-700">add_location_alt</span>
-                Add New District Master
+                Add New {activeTab.slice(0, -1).toUpperCase()}
               </ModalHeader>
               <ModalBody className="space-y-3">
-                <Select
-                  size="sm"
-                  label="State Jurisdiction"
-                  labelPlacement="outside"
-                  selectedKeys={[formData.state]}
-                  onChange={(e) => setFormData({ ...formData, state: e.target.value })}
-                  isRequired
-                >
-                  <SelectItem key="Uttar Pradesh">Uttar Pradesh</SelectItem>
-                  <SelectItem key="West Bengal">West Bengal</SelectItem>
-                  <SelectItem key="Delhi">Delhi</SelectItem>
-                  <SelectItem key="Bihar">Bihar</SelectItem>
-                </Select>
-                <Input
-                  size="sm"
-                  label="Administrative Zone / Police Range"
-                  labelPlacement="outside"
-                  placeholder="e.g. Bareilly Range"
-                  value={formData.zone}
-                  onValueChange={(v) => setFormData({ ...formData, zone: v })}
-                />
-                <Input
-                  size="sm"
-                  label="District Name"
-                  labelPlacement="outside"
-                  placeholder="e.g. Bareilly"
-                  value={formData.district}
-                  onValueChange={(v) => setFormData({ ...formData, district: v })}
-                  isRequired
-                />
-                <Input
-                  size="sm"
-                  label="Headquarters Name"
-                  labelPlacement="outside"
-                  placeholder="e.g. Bareilly City"
-                  value={formData.headquarters}
-                  onValueChange={(v) => setFormData({ ...formData, headquarters: v })}
-                />
+                {activeTab === "states" && (
+                  <>
+                    <Input
+                      size="sm"
+                      label="State Name"
+                      placeholder="e.g. Uttar Pradesh"
+                      value={formData.stateName || ""}
+                      onValueChange={(v) => setFormData({ ...formData, stateName: v })}
+                      isRequired
+                    />
+                    <Input
+                      size="sm"
+                      label="State Code (2-Letter ISO)"
+                      placeholder="e.g. UP"
+                      value={formData.stateCode || ""}
+                      onValueChange={(v) => setFormData({ ...formData, stateCode: v })}
+                      isRequired
+                    />
+                  </>
+                )}
+
+                {activeTab === "zones" && (
+                  <>
+                    <Select
+                      size="sm"
+                      label="Select State"
+                      selectedKeys={formData.stateId ? [formData.stateId] : []}
+                      onChange={(e) => setFormData({ ...formData, stateId: e.target.value })}
+                      isRequired
+                    >
+                      {states.map((s) => (
+                        <SelectItem key={s._id} value={s._id}>{s.stateName}</SelectItem>
+                      ))}
+                    </Select>
+                    <Input
+                      size="sm"
+                      label="Zone Name"
+                      placeholder="e.g. Lucknow Zone"
+                      value={formData.zoneName || ""}
+                      onValueChange={(v) => setFormData({ ...formData, zoneName: v })}
+                      isRequired
+                    />
+                    <Input
+                      size="sm"
+                      label="Headquarters"
+                      placeholder="e.g. Lucknow"
+                      value={formData.headquarters || ""}
+                      onValueChange={(v) => setFormData({ ...formData, headquarters: v })}
+                    />
+                  </>
+                )}
+
+                {activeTab === "ranges" && (
+                  <>
+                    <Select
+                      size="sm"
+                      label="Select State"
+                      selectedKeys={formData.stateId ? [formData.stateId] : []}
+                      onChange={(e) => setFormData({ ...formData, stateId: e.target.value, zoneId: "" })}
+                      isRequired
+                    >
+                      {states.map((s) => (
+                        <SelectItem key={s._id} value={s._id}>{s.stateName}</SelectItem>
+                      ))}
+                    </Select>
+                    <Select
+                      size="sm"
+                      label="Select Zone"
+                      selectedKeys={formData.zoneId ? [formData.zoneId] : []}
+                      onChange={(e) => setFormData({ ...formData, zoneId: e.target.value })}
+                      isRequired
+                    >
+                      {filteredZones.map((z) => (
+                        <SelectItem key={z._id} value={z._id}>{z.zoneName}</SelectItem>
+                      ))}
+                    </Select>
+                    <Input
+                      size="sm"
+                      label="Range Name"
+                      placeholder="e.g. Lucknow Range"
+                      value={formData.rangeName || ""}
+                      onValueChange={(v) => setFormData({ ...formData, rangeName: v })}
+                      isRequired
+                    />
+                  </>
+                )}
+
+                {activeTab === "districts" && (
+                  <>
+                    <Select
+                      size="sm"
+                      label="Select State"
+                      selectedKeys={formData.stateId ? [formData.stateId] : []}
+                      onChange={(e) => setFormData({ ...formData, stateId: e.target.value, zoneId: "", rangeId: "" })}
+                      isRequired
+                    >
+                      {states.map((s) => (
+                        <SelectItem key={s._id} value={s._id}>{s.stateName}</SelectItem>
+                      ))}
+                    </Select>
+                    <Select
+                      size="sm"
+                      label="Select Zone"
+                      selectedKeys={formData.zoneId ? [formData.zoneId] : []}
+                      onChange={(e) => setFormData({ ...formData, zoneId: e.target.value, rangeId: "" })}
+                      isRequired
+                    >
+                      {filteredZones.map((z) => (
+                        <SelectItem key={z._id} value={z._id}>{z.zoneName}</SelectItem>
+                      ))}
+                    </Select>
+                    <Select
+                      size="sm"
+                      label="Select Police Range"
+                      selectedKeys={formData.rangeId ? [formData.rangeId] : []}
+                      onChange={(e) => setFormData({ ...formData, rangeId: e.target.value })}
+                      isRequired
+                    >
+                      {filteredRanges.map((r) => (
+                        <SelectItem key={r._id} value={r._id}>{r.rangeName}</SelectItem>
+                      ))}
+                    </Select>
+                    <Input
+                      size="sm"
+                      label="District Name"
+                      placeholder="e.g. Lucknow"
+                      value={formData.districtName || ""}
+                      onValueChange={(v) => setFormData({ ...formData, districtName: v })}
+                      isRequired
+                    />
+                  </>
+                )}
               </ModalBody>
               <ModalFooter>
                 <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
@@ -289,9 +524,10 @@ export default function LocationMasterPage() {
                   size="sm"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  onClick={handleAdd}
+                  isLoading={isSubmitting}
+                  onClick={handleSubmitAdd}
                 >
-                  Save District
+                  Save Record
                 </Button>
               </ModalFooter>
             </>
@@ -299,70 +535,7 @@ export default function LocationMasterPage() {
         </ModalContent>
       </Modal>
 
-      {/* 2. Edit District Modal */}
-      <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top">
-        <ModalContent>
-          {(onClose) => (
-            <>
-              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span className="material-symbols-rounded text-blue-700">edit_location</span>
-                Edit District: {editingItem?.district}
-              </ModalHeader>
-              <ModalBody className="space-y-3">
-                <Select
-                  size="sm"
-                  label="State Jurisdiction"
-                  labelPlacement="outside"
-                  selectedKeys={editingItem ? [editingItem.state] : ["Uttar Pradesh"]}
-                  onChange={(e) => setEditingItem({ ...editingItem, state: e.target.value })}
-                >
-                  <SelectItem key="Uttar Pradesh">Uttar Pradesh</SelectItem>
-                  <SelectItem key="West Bengal">West Bengal</SelectItem>
-                  <SelectItem key="Delhi">Delhi</SelectItem>
-                  <SelectItem key="Bihar">Bihar</SelectItem>
-                </Select>
-                <Input
-                  size="sm"
-                  label="Administrative Zone / Police Range"
-                  labelPlacement="outside"
-                  value={editingItem?.zone || ""}
-                  onValueChange={(v) => setEditingItem({ ...editingItem, zone: v })}
-                />
-                <Input
-                  size="sm"
-                  label="District Name"
-                  labelPlacement="outside"
-                  value={editingItem?.district || ""}
-                  onValueChange={(v) => setEditingItem({ ...editingItem, district: v })}
-                  isRequired
-                />
-                <Input
-                  size="sm"
-                  label="Headquarters"
-                  labelPlacement="outside"
-                  value={editingItem?.headquarters || ""}
-                  onValueChange={(v) => setEditingItem({ ...editingItem, headquarters: v })}
-                />
-              </ModalBody>
-              <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  radius="sm"
-                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  onClick={handleSaveEdit}
-                >
-                  Save Changes
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* 3. Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal */}
       <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
         <ModalContent>
           {(onClose) => (
@@ -372,7 +545,7 @@ export default function LocationMasterPage() {
                 Confirm Deletion
               </ModalHeader>
               <ModalBody className="text-xs text-slate-600">
-                Are you sure you want to remove <b>{itemToDelete?.district}</b> ({itemToDelete?.state}) from the location master? Active petitions linked to this district may lose geographical mapping.
+                Are you sure you want to remove <b>{itemToDelete?.districtName || itemToDelete?.stateName}</b>? Dockets linked to this record might be affected.
               </ModalBody>
               <ModalFooter>
                 <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
@@ -382,9 +555,10 @@ export default function LocationMasterPage() {
                   size="sm"
                   radius="sm"
                   className="bg-rose-600 font-semibold text-white hover:bg-rose-700"
+                  isLoading={isSubmitting}
                   onClick={handleConfirmDelete}
                 >
-                  Delete Record
+                  Delete
                 </Button>
               </ModalFooter>
             </>

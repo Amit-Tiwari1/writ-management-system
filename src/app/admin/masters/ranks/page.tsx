@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   CardBody,
@@ -21,84 +21,211 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Skeleton,
 } from "@nextui-org/react";
 import Link from "next/link";
+import { useForm, Controller, SubmitHandler } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import toast from "react-hot-toast";
+import { MastersAPI } from "@/api/mastersApi";
+import { z } from "zod";
+
+const rankFormSchema = z.object({
+  rankName: z.string().min(2, "Rank name is required").trim(),
+  shortCode: z.string().min(2, "Short code is required").toUpperCase().trim(),
+  cadreType: z.string().min(1, "Cadre type is required"),
+  payLevelGrade: z.string().min(1, "Pay level grade is required"),
+});
+
+type RankFormValues = z.infer<typeof rankFormSchema>;
+
+interface RankRecord {
+  _id: string;
+  rankName: string;
+  shortCode: string;
+  cadreType: string;
+  payLevelGrade: string;
+  createdAt?: string;
+}
+
+const CADRE_ITEMS = [
+  { key: "Non-Gazetted", label: "Non-Gazetted" },
+  { key: "Non-Gazetted (Executive)", label: "Non-Gazetted (Executive)" },
+  { key: "Gazetted Class II", label: "Gazetted Class II" },
+  { key: "Ministerial / Technical", label: "Ministerial / Technical" },
+  { key: "State Police Service (PPS)", label: "State Police Service (PPS)" },
+  { key: "Indian Police Service (IPS)", label: "Indian Police Service (IPS)" },
+];
+
+const CADRE_FILTER_ITEMS = [
+  { key: "ALL", label: "All Cadres" },
+  ...CADRE_ITEMS,
+];
+
+const PAY_LEVEL_ITEMS = [
+  { key: "Pay Level 3", label: "Pay Level 3" },
+  { key: "Pay Level 4", label: "Pay Level 4" },
+  { key: "Pay Level 5", label: "Pay Level 5" },
+  { key: "Pay Level 6", label: "Pay Level 6" },
+  { key: "Pay Level 7", label: "Pay Level 7" },
+  { key: "Pay Level 8", label: "Pay Level 8" },
+  { key: "Pay Level 10", label: "Pay Level 10" },
+  { key: "Pay Level 12", label: "Pay Level 12" },
+  { key: "Pay Level 14", label: "Pay Level 14" },
+];
 
 export default function RankMasterPage() {
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
   const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
 
+  const [ranks, setRanks] = useState<RankRecord[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCadreFilter, setSelectedCadreFilter] = useState("ALL");
 
-  const [ranks, setRanks] = useState([
-    { id: 1, name: "Constable", shortCode: "CT", cadreType: "Non-Gazetted", level: "Pay Level 3" },
-    { id: 2, name: "Head Constable", shortCode: "HC", cadreType: "Non-Gazetted", level: "Pay Level 4" },
-    { id: 3, name: "Sub Inspector", shortCode: "SI", cadreType: "Non-Gazetted (Executive)", level: "Pay Level 6" },
-    { id: 4, name: "Inspector", shortCode: "INSP", cadreType: "Gazetted Class II", level: "Pay Level 7" },
-    { id: 5, name: "Computer Operator Grade A", shortCode: "CO-A", cadreType: "Ministerial / Technical", level: "Pay Level 4" },
-    { id: 6, name: "Deputy Superintendent of Police", shortCode: "DySP", cadreType: "State Police Service (PPS)", level: "Pay Level 10" },
-    { id: 7, name: "Additional S.P.", shortCode: "Addl. SP", cadreType: "State Police Service (PPS)", level: "Pay Level 12" },
-    { id: 8, name: "Superintendent of Police", shortCode: "SP", cadreType: "Indian Police Service (IPS)", level: "Pay Level 12" },
-  ]);
+  const [editingRank, setEditingRank] = useState<RankRecord | null>(null);
+  const [rankToDelete, setRankToDelete] = useState<RankRecord | null>(null);
 
-  const [formData, setFormData] = useState({
-    name: "",
-    shortCode: "",
-    cadreType: "Non-Gazetted",
-    level: "Pay Level 3",
+  // React Hook Form for Add
+  const {
+    control: addControl,
+    handleSubmit: handleAddSubmit,
+    reset: resetAddForm,
+    formState: { errors: addErrors },
+  } = useForm<RankFormValues>({
+    resolver: zodResolver(rankFormSchema),
+    defaultValues: {
+      rankName: "",
+      shortCode: "",
+      cadreType: "Non-Gazetted",
+      payLevelGrade: "Pay Level 3",
+    },
   });
 
-  const [editingRank, setEditingRank] = useState<any>(null);
-  const [rankToDelete, setRankToDelete] = useState<any>(null);
+  // React Hook Form for Edit
+  const {
+    control: editControl,
+    handleSubmit: handleEditSubmit,
+    reset: resetEditForm,
+    formState: { errors: editErrors },
+  } = useForm<RankFormValues>({
+    resolver: zodResolver(rankFormSchema),
+    defaultValues: {
+      rankName: "",
+      shortCode: "",
+      cadreType: "Non-Gazetted",
+      payLevelGrade: "Pay Level 3",
+    },
+  });
 
-  const handleAdd = () => {
-    if (!formData.name.trim()) return;
-    setRanks((prev) => [
-      ...prev,
-      {
-        id: prev.length + 1,
-        name: formData.name.trim(),
-        shortCode: formData.shortCode.trim().toUpperCase() || `R-${prev.length + 1}`,
-        cadreType: formData.cadreType,
-        level: formData.level,
-      },
-    ]);
-    setFormData({ name: "", shortCode: "", cadreType: "Non-Gazetted", level: "Pay Level 3" });
-    onAddOpenChange();
+  // Fetch Ranks from Real Backend API
+  const fetchRanks = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await MastersAPI.getRanks();
+      if (res?.success) {
+        setRanks(res.data || []);
+      }
+    } catch (err: any) {
+      console.error("[RankMaster] Error fetching ranks:", err);
+      toast.error(err.response?.data?.message || "Failed to load rank masters");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRanks();
+  }, [fetchRanks]);
+
+  const handleOpenAdd = () => {
+    resetAddForm({
+      rankName: "",
+      shortCode: "",
+      cadreType: "Non-Gazetted",
+      payLevelGrade: "Pay Level 3",
+    });
+    onAddOpen();
   };
 
-  const handleOpenEdit = (item: any) => {
-    setEditingRank({ ...item });
+  // Submit Add to Backend
+  const onAddRank: SubmitHandler<RankFormValues> = async (values) => {
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        rankName: values.rankName.trim(),
+        shortCode: values.shortCode.trim().toUpperCase(),
+        cadreType: values.cadreType,
+        payLevelGrade: values.payLevelGrade,
+      };
+
+      const res = await MastersAPI.createRank(payload);
+      if (res?.success) {
+        toast.success(`Rank ${payload.shortCode} added successfully!`);
+        onAddOpenChange();
+        fetchRanks();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to create rank record");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleOpenEdit = (item: RankRecord) => {
+    setEditingRank(item);
+    resetEditForm({
+      rankName: item.rankName,
+      shortCode: item.shortCode,
+      cadreType: item.cadreType,
+      payLevelGrade: item.payLevelGrade,
+    });
     onEditOpen();
   };
 
-  const handleSaveEdit = () => {
+  const onSaveEdit: SubmitHandler<RankFormValues> = async (values) => {
     if (!editingRank) return;
-    setRanks((prev) =>
-      prev.map((r) => (r.id === editingRank.id ? editingRank : r))
-    );
-    onEditOpenChange();
+    try {
+      setIsSubmitting(true);
+      setRanks((prev) =>
+        prev.map((r) =>
+          r._id === editingRank._id
+            ? { ...r, ...values, shortCode: values.shortCode.toUpperCase() }
+            : r
+        )
+      );
+      toast.success(`Updated ${values.shortCode}`);
+      onEditOpenChange();
+      setEditingRank(null);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to update rank");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleOpenDelete = (item: any) => {
+  const handleOpenDelete = (item: RankRecord) => {
     setRankToDelete(item);
     onDeleteOpen();
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!rankToDelete) return;
-    setRanks((prev) => prev.filter((r) => r.id !== rankToDelete.id));
+    setRanks((prev) => prev.filter((r) => r._id !== rankToDelete._id));
+    toast.success(`Rank ${rankToDelete.shortCode} removed.`);
     onDeleteOpenChange();
+    setRankToDelete(null);
   };
 
   const filteredRanks = useMemo(() => {
     return ranks.filter((item) => {
       const matchesSearch =
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.shortCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.level.toLowerCase().includes(searchQuery.toLowerCase());
+        item.rankName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.shortCode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.payLevelGrade?.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchesCadre =
         selectedCadreFilter === "ALL" || item.cadreType === selectedCadreFilter;
@@ -115,7 +242,7 @@ export default function RankMasterPage() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <Link href="/admin/cases">
+                <Link href="/admin/masters">
                   <Button isIconOnly size="sm" variant="light" className="text-slate-500">
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
@@ -134,7 +261,7 @@ export default function RankMasterPage() {
               radius="sm"
               className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
               startContent={<span className="material-symbols-rounded text-sm">add</span>}
-              onPress={onAddOpen}
+              onPress={handleOpenAdd}
             >
               Add New Rank
             </Button>
@@ -154,18 +281,14 @@ export default function RankMasterPage() {
             <Select
               size="sm"
               radius="sm"
+              aria-label="Filter by Cadre Type"
               placeholder="Filter by Cadre Type"
+              items={CADRE_FILTER_ITEMS}
               selectedKeys={[selectedCadreFilter]}
               onChange={(e) => setSelectedCadreFilter(e.target.value || "ALL")}
               className="bg-slate-50"
             >
-              <SelectItem key="ALL">All Cadres</SelectItem>
-              <SelectItem key="Non-Gazetted">Non-Gazetted</SelectItem>
-              <SelectItem key="Non-Gazetted (Executive)">Non-Gazetted (Executive)</SelectItem>
-              <SelectItem key="Gazetted Class II">Gazetted Class II</SelectItem>
-              <SelectItem key="Ministerial / Technical">Ministerial / Technical</SelectItem>
-              <SelectItem key="State Police Service (PPS)">State Police Service (PPS)</SelectItem>
-              <SelectItem key="Indian Police Service (IPS)">Indian Police Service (IPS)</SelectItem>
+              {(cadre) => <SelectItem key={cadre.key}>{cadre.label}</SelectItem>}
             </Select>
           </div>
         </CardBody>
@@ -183,42 +306,56 @@ export default function RankMasterPage() {
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">PAY GRADE</TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
             </TableHeader>
-            <TableBody items={filteredRanks} emptyContent="No police ranks match the specified criteria.">
-              {(item) => (
-                <TableRow key={item.id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                  <TableCell className="text-xs font-bold text-slate-400">{item.id}</TableCell>
-                  <TableCell className="text-xs font-bold text-slate-900">{item.name}</TableCell>
-                  <TableCell className="font-mono text-xs font-semibold text-blue-700">{item.shortCode}</TableCell>
-                  <TableCell className="text-xs text-slate-600">{item.cadreType}</TableCell>
-                  <TableCell>
-                    <Chip size="sm" variant="flat" color="default" className="text-xs font-semibold text-slate-700">
-                      {item.level}
-                    </Chip>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        className="text-slate-400 hover:text-slate-700"
-                        onClick={() => handleOpenEdit(item)}
-                      >
-                        <span className="material-symbols-rounded text-sm">edit</span>
-                      </Button>
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        className="text-slate-400 hover:text-rose-600"
-                        onClick={() => handleOpenDelete(item)}
-                      >
-                        <span className="material-symbols-rounded text-sm">delete</span>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
+            <TableBody
+              items={filteredRanks}
+              isLoading={loading}
+              loadingContent={
+                <div className="p-4 space-y-2">
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                  <Skeleton className="h-6 w-full rounded" />
+                </div>
+              }
+              emptyContent={!loading ? "No police ranks match the specified criteria." : " "}
+            >
+              {(item) => {
+                const index = ranks.findIndex((r) => r._id === item._id) + 1;
+                return (
+                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <TableCell className="text-xs font-bold text-slate-400">{index}</TableCell>
+                    <TableCell className="text-xs font-bold text-slate-900">{item.rankName}</TableCell>
+                    <TableCell className="font-mono text-xs font-semibold text-blue-700">{item.shortCode}</TableCell>
+                    <TableCell className="text-xs text-slate-600">{item.cadreType}</TableCell>
+                    <TableCell>
+                      <Chip size="sm" variant="flat" color="default" className="text-xs font-semibold text-slate-700">
+                        {item.payLevelGrade}
+                      </Chip>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="light"
+                          className="text-slate-400 hover:text-slate-700"
+                          onClick={() => handleOpenEdit(item)}
+                        >
+                          <span className="material-symbols-rounded text-sm">edit</span>
+                        </Button>
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="light"
+                          className="text-slate-400 hover:text-rose-600"
+                          onClick={() => handleOpenDelete(item)}
+                        >
+                          <span className="material-symbols-rounded text-sm">delete</span>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              }}
             </TableBody>
           </Table>
         </CardBody>
@@ -228,78 +365,101 @@ export default function RankMasterPage() {
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
-            <>
+            <form onSubmit={handleAddSubmit(onAddRank)}>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span className="material-symbols-rounded text-blue-700">military_tech</span>
                 Add Service Rank Master
               </ModalHeader>
               <ModalBody className="space-y-3">
-                <Input
-                  size="sm"
-                  label="Official Rank Title"
-                  labelPlacement="outside"
-                  placeholder="e.g. Assistant Sub Inspector"
-                  value={formData.name}
-                  onValueChange={(v) => setFormData({ ...formData, name: v })}
-                  isRequired
+                <Controller
+                  name="rankName"
+                  control={addControl}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      size="sm"
+                      label="Official Rank Title"
+                      labelPlacement="outside"
+                      placeholder="e.g. Assistant Sub Inspector"
+                      isInvalid={!!addErrors.rankName}
+                      errorMessage={addErrors.rankName?.message}
+                      isRequired
+                    />
+                  )}
                 />
-                <Input
-                  size="sm"
-                  label="Short Acronym / Code"
-                  labelPlacement="outside"
-                  placeholder="e.g. ASI"
-                  value={formData.shortCode}
-                  onValueChange={(v) => setFormData({ ...formData, shortCode: v })}
-                  isRequired
+
+                <Controller
+                  name="shortCode"
+                  control={addControl}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      size="sm"
+                      label="Short Acronym / Code"
+                      labelPlacement="outside"
+                      placeholder="e.g. ASI"
+                      isInvalid={!!addErrors.shortCode}
+                      errorMessage={addErrors.shortCode?.message}
+                      isRequired
+                    />
+                  )}
                 />
-                <Select
-                  size="sm"
-                  label="Cadre Classification"
-                  labelPlacement="outside"
-                  selectedKeys={[formData.cadreType]}
-                  onChange={(e) => setFormData({ ...formData, cadreType: e.target.value })}
-                  isRequired
-                >
-                  <SelectItem key="Non-Gazetted">Non-Gazetted</SelectItem>
-                  <SelectItem key="Non-Gazetted (Executive)">Non-Gazetted (Executive)</SelectItem>
-                  <SelectItem key="Gazetted Class II">Gazetted Class II</SelectItem>
-                  <SelectItem key="Ministerial / Technical">Ministerial / Technical</SelectItem>
-                  <SelectItem key="State Police Service (PPS)">State Police Service (PPS)</SelectItem>
-                  <SelectItem key="Indian Police Service (IPS)">Indian Police Service (IPS)</SelectItem>
-                </Select>
-                <Select
-                  size="sm"
-                  label="Applicable Pay Level"
-                  labelPlacement="outside"
-                  selectedKeys={[formData.level]}
-                  onChange={(e) => setFormData({ ...formData, level: e.target.value })}
-                  isRequired
-                >
-                  <SelectItem key="Pay Level 3">Pay Level 3</SelectItem>
-                  <SelectItem key="Pay Level 4">Pay Level 4</SelectItem>
-                  <SelectItem key="Pay Level 5">Pay Level 5</SelectItem>
-                  <SelectItem key="Pay Level 6">Pay Level 6</SelectItem>
-                  <SelectItem key="Pay Level 7">Pay Level 7</SelectItem>
-                  <SelectItem key="Pay Level 8">Pay Level 8</SelectItem>
-                  <SelectItem key="Pay Level 10">Pay Level 10</SelectItem>
-                  <SelectItem key="Pay Level 12">Pay Level 12</SelectItem>
-                  <SelectItem key="Pay Level 14">Pay Level 14</SelectItem>
-                </Select>
+
+                <Controller
+                  name="cadreType"
+                  control={addControl}
+                  render={({ field }) => (
+                    <Select
+                      size="sm"
+                      label="Cadre Classification"
+                      labelPlacement="outside"
+                      items={CADRE_ITEMS}
+                      selectedKeys={[field.value]}
+                      onChange={(e) => field.onChange(e.target.value)}
+                      isInvalid={!!addErrors.cadreType}
+                      errorMessage={addErrors.cadreType?.message}
+                      isRequired
+                    >
+                      {(cadre) => <SelectItem key={cadre.key}>{cadre.label}</SelectItem>}
+                    </Select>
+                  )}
+                />
+
+                <Controller
+                  name="payLevelGrade"
+                  control={addControl}
+                  render={({ field }) => (
+                    <Select
+                      size="sm"
+                      label="Applicable Pay Level"
+                      labelPlacement="outside"
+                      items={PAY_LEVEL_ITEMS}
+                      selectedKeys={[field.value]}
+                      onChange={(e) => field.onChange(e.target.value)}
+                      isInvalid={!!addErrors.payLevelGrade}
+                      errorMessage={addErrors.payLevelGrade?.message}
+                      isRequired
+                    >
+                      {(pay) => <SelectItem key={pay.key}>{pay.label}</SelectItem>}
+                    </Select>
+                  )}
+                />
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
+                  type="submit"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  onClick={handleAdd}
+                  isLoading={isSubmitting}
                 >
                   Save Rank
                 </Button>
               </ModalFooter>
-            </>
+            </form>
           )}
         </ModalContent>
       </Modal>
@@ -308,74 +468,93 @@ export default function RankMasterPage() {
       <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
-            <>
+            <form onSubmit={handleEditSubmit(onSaveEdit)}>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span className="material-symbols-rounded text-blue-700">edit</span>
-                Edit Service Rank: {editingRank?.name}
+                Edit Service Rank: {editingRank?.rankName}
               </ModalHeader>
               <ModalBody className="space-y-3">
-                <Input
-                  size="sm"
-                  label="Rank Title"
-                  labelPlacement="outside"
-                  value={editingRank?.name || ""}
-                  onValueChange={(v) => setEditingRank({ ...editingRank, name: v })}
-                  isRequired
+                <Controller
+                  name="rankName"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      size="sm"
+                      label="Rank Title"
+                      labelPlacement="outside"
+                      isInvalid={!!editErrors.rankName}
+                      errorMessage={editErrors.rankName?.message}
+                      isRequired
+                    />
+                  )}
                 />
-                <Input
-                  size="sm"
-                  label="Short Code"
-                  labelPlacement="outside"
-                  value={editingRank?.shortCode || ""}
-                  onValueChange={(v) => setEditingRank({ ...editingRank, shortCode: v })}
-                  isRequired
+
+                <Controller
+                  name="shortCode"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      size="sm"
+                      label="Short Code"
+                      labelPlacement="outside"
+                      isInvalid={!!editErrors.shortCode}
+                      errorMessage={editErrors.shortCode?.message}
+                      isRequired
+                    />
+                  )}
                 />
-                <Select
-                  size="sm"
-                  label="Cadre Classification"
-                  labelPlacement="outside"
-                  selectedKeys={editingRank ? [editingRank.cadreType] : ["Non-Gazetted"]}
-                  onChange={(e) => setEditingRank({ ...editingRank, cadreType: e.target.value })}
-                >
-                  <SelectItem key="Non-Gazetted">Non-Gazetted</SelectItem>
-                  <SelectItem key="Non-Gazetted (Executive)">Non-Gazetted (Executive)</SelectItem>
-                  <SelectItem key="Gazetted Class II">Gazetted Class II</SelectItem>
-                  <SelectItem key="Ministerial / Technical">Ministerial / Technical</SelectItem>
-                  <SelectItem key="State Police Service (PPS)">State Police Service (PPS)</SelectItem>
-                  <SelectItem key="Indian Police Service (IPS)">Indian Police Service (IPS)</SelectItem>
-                </Select>
-                <Select
-                  size="sm"
-                  label="Pay Grade Level"
-                  labelPlacement="outside"
-                  selectedKeys={editingRank ? [editingRank.level] : ["Pay Level 3"]}
-                  onChange={(e) => setEditingRank({ ...editingRank, level: e.target.value })}
-                >
-                  <SelectItem key="Pay Level 3">Pay Level 3</SelectItem>
-                  <SelectItem key="Pay Level 4">Pay Level 4</SelectItem>
-                  <SelectItem key="Pay Level 5">Pay Level 5</SelectItem>
-                  <SelectItem key="Pay Level 6">Pay Level 6</SelectItem>
-                  <SelectItem key="Pay Level 7">Pay Level 7</SelectItem>
-                  <SelectItem key="Pay Level 8">Pay Level 8</SelectItem>
-                  <SelectItem key="Pay Level 10">Pay Level 10</SelectItem>
-                  <SelectItem key="Pay Level 12">Pay Level 12</SelectItem>
-                  <SelectItem key="Pay Level 14">Pay Level 14</SelectItem>
-                </Select>
+
+                <Controller
+                  name="cadreType"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Select
+                      size="sm"
+                      label="Cadre Classification"
+                      labelPlacement="outside"
+                      items={CADRE_ITEMS}
+                      selectedKeys={[field.value]}
+                      onChange={(e) => field.onChange(e.target.value)}
+                    >
+                      {(cadre) => <SelectItem key={cadre.key}>{cadre.label}</SelectItem>}
+                    </Select>
+                  )}
+                />
+
+                <Controller
+                  name="payLevelGrade"
+                  control={editControl}
+                  render={({ field }) => (
+                    <Select
+                      size="sm"
+                      label="Pay Grade Level"
+                      labelPlacement="outside"
+                      items={PAY_LEVEL_ITEMS}
+                      selectedKeys={[field.value]}
+                      onChange={(e) => field.onChange(e.target.value)}
+                    >
+                      {(pay) => <SelectItem key={pay.key}>{pay.label}</SelectItem>}
+                    </Select>
+                  )}
+                />
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
+                  type="submit"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  onClick={handleSaveEdit}
+                  isLoading={isSubmitting}
                 >
                   Save Changes
                 </Button>
               </ModalFooter>
-            </>
+            </form>
           )}
         </ModalContent>
       </Modal>
@@ -390,8 +569,7 @@ export default function RankMasterPage() {
                 Confirm Deletion
               </ModalHeader>
               <ModalBody className="text-xs text-slate-600">
-                Are you sure you want to remove <b>{rankToDelete?.name}</b> ({rankToDelete?.shortCode})?
-                Candidate profiles in active writs referencing this cadre might be affected.
+                Are you sure you want to remove <b>{rankToDelete?.rankName}</b> ({rankToDelete?.shortCode})?
               </ModalBody>
               <ModalFooter>
                 <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>

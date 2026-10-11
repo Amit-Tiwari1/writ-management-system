@@ -1,20 +1,24 @@
-"use client";
-
 import "./globals.css";
-import { NextUIProvider } from "@nextui-org/react";
-import { useRouter } from "next/navigation";
+import { Providers } from "./providers/providers";
+
+export const metadata = {
+  title: "UPPRPB | Enterprise Legal & Compliance Management System",
+  description: "Writ Case Management System (WCMS v2.0)",
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/favicon.ico",
+  },
+};
 
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
-
   return (
     <html lang="en">
       <head>
-        <title>LexWrit | Enterprise Legal & Compliance Management System</title>
         <link
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
@@ -27,9 +31,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen bg-slate-50 font-sans text-slate-900 antialiased selection:bg-blue-600 selection:text-white">
-        <NextUIProvider navigate={router.push}>
-          {children}
-        </NextUIProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
