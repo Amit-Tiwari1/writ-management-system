@@ -14,7 +14,6 @@ export default function LoginPage() {
   const router = useRouter();
   const dispatch = useAppDispatch();
   const { isAuthenticated, isLoading, error } = useAppSelector((state) => state.auth);
-
   const [showPassword, setShowPassword] = useState(false);
   const [logoError, setLogoError] = useState(false);
 
@@ -123,7 +122,6 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Backend Error Alert */}
           {error && (
             <div className="mb-4 flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-800">
               <span className="material-symbols-rounded text-sm text-rose-600">error</span>

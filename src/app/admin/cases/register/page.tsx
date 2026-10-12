@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Card,
   CardBody,
@@ -31,6 +31,7 @@ import toast from "react-hot-toast";
 
 import axiosClient from "@/api/axiosClient";
 import { MastersAPI, IntakeDropdownBundle } from "@/api/mastersApi";
+import { AdminAPI, StaffUserItem } from "@/api/userApi";
 import {
   caseIntakeFormSchema,
   CaseIntakeFormValues,
@@ -47,6 +48,7 @@ export default function CaseIntakeWizardPage() {
   const router = useRouter();
   const [activeStep, setActiveStep] = useState<number>(1);
   const [dropdowns, setDropdowns] = useState<IntakeDropdownBundle | null>(null);
+  const [staffUsers, setStaffUsers] = useState<StaffUserItem[]>([]);
   const [isResolving, setIsResolving] = useState<boolean>(false);
   const [isCheckingDuplicate, setIsCheckingDuplicate] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -98,8 +100,8 @@ export default function CaseIntakeWizardPage() {
       petitionerPhone: "",
       respondentString: "State of U.P. & Chairman UPPRPB",
       sectionWing: "Recruitment Wing",
-      assignedOIC: "Superintendent of Police (Legal)",
-      assignedPairokar: "Shanu Pratap Singh (SI)",
+      assignedOIC: "",
+      assignedPairokar: "",
       category: "Recruitment",
       subCategory: "",
       disputeSubject: "",
@@ -119,24 +121,38 @@ export default function CaseIntakeWizardPage() {
   const watchCaseNumber = watch("caseNumber");
   const watchCaseYear = watch("caseYear");
 
+  // Load Masters & Staff Directory for OIC selection
   useEffect(() => {
-    async function loadMasters() {
+    async function loadData() {
       try {
-        const res = await MastersAPI.getIntakeDropdowns();
-        if (res?.success) {
-          setDropdowns(res.data);
-          if (res.data.categories?.length > 0) {
-            const firstCat = res.data.categories[0];
+        const [mastersRes, usersRes] = await Promise.all([
+          MastersAPI.getIntakeDropdowns(),
+          AdminAPI.getUsersList(),
+        ]);
+
+        if (mastersRes?.success) {
+          setDropdowns(mastersRes.data);
+          if (mastersRes.data.categories?.length > 0) {
+            const firstCat = mastersRes.data.categories[0];
             setValue("category", firstCat.categoryName);
             setValue("categoryId", firstCat._id);
             fetchSubCategories(firstCat._id);
           }
         }
+
+        if (usersRes?.success && Array.isArray(usersRes.data)) {
+          setStaffUsers(usersRes.data);
+          // Set first officer as default if available
+          if (usersRes.data.length > 0) {
+            setValue("assignedOIC", usersRes.data[0].officerName);
+            setValue("assignedPairokar", usersRes.data[0].officerName);
+          }
+        }
       } catch (err: any) {
-        console.error("Failed to load dropdown bundle:", err);
+        console.error("Failed to load intake dependencies:", err);
       }
     }
-    loadMasters();
+    loadData();
   }, [setValue]);
 
   const fetchSubCategories = async (categoryId: string) => {
@@ -174,6 +190,19 @@ export default function CaseIntakeWizardPage() {
       console.error(err);
     }
   };
+
+  const oicOptions = useMemo(() => {
+    if (!staffUsers || staffUsers.length === 0) {
+      return [
+        { key: "Superintendent of Police (Legal)", label: "Superintendent of Police (Legal)" },
+        { key: "DySP Legal Desk", label: "DySP Legal Desk" },
+      ];
+    }
+    return staffUsers.map((u) => ({
+      key: u.officerName,
+      label: `${u.officerName} (${u.designationAndWing.designation} - ${u.designationAndWing.wing})`,
+    }));
+  }, [staffUsers]);
 
   const courtOptions = useMemo(() => {
     if (!dropdowns?.courts) {
@@ -1065,33 +1094,43 @@ export default function CaseIntakeWizardPage() {
                   )}
                 />
 
+                {/* DYNAMIC OIC SELECT DROPDOWN */}
                 <Controller
                   name="assignedOIC"
                   control={control}
                   render={({ field }) => (
-                    <Input
-                      {...field}
+                    <Select
                       size="sm"
                       label="Officer-in-Charge (OIC)"
                       labelPlacement="outside"
-                      placeholder="e.g. Superintendent of Police (Legal)"
+                      items={oicOptions}
+                      selectedKeys={field.value ? [field.value] : []}
+                      onChange={(e) => field.onChange(e.target.value)}
+                      placeholder="Select designated OIC..."
                       isRequired
-                    />
+                    >
+                      {(oic) => <SelectItem key={oic.key}>{oic.label}</SelectItem>}
+                    </Select>
                   )}
                 />
 
+                {/* DYNAMIC PAIROKAR SELECT DROPDOWN */}
                 <Controller
                   name="assignedPairokar"
                   control={control}
                   render={({ field }) => (
-                    <Input
-                      {...field}
+                    <Select
                       size="sm"
                       label="Designated Court Pairokar"
                       labelPlacement="outside"
-                      placeholder="e.g. Shanu Pratap Singh (SI)"
+                      items={oicOptions}
+                      selectedKeys={field.value ? [field.value] : []}
+                      onChange={(e) => field.onChange(e.target.value)}
+                      placeholder="Select court pairokar..."
                       isRequired
-                    />
+                    >
+                      {(p) => <SelectItem key={p.key}>{p.label}</SelectItem>}
+                    </Select>
                   )}
                 />
               </div>

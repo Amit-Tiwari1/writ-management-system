@@ -19,7 +19,6 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
   const dispatch = useAppDispatch();
   const { user } = useAppSelector((state) => state.auth);
 
-  // Dynamic Accordion State map
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const toggleAccordion = (key: string) => {
@@ -29,7 +28,6 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
   const isActive = (route: string) => pathname === route;
   const isStartsWith = (route: string) => pathname.startsWith(route);
 
-  // Group menus strictly according to backend database structure
   const groupedMenus = useMemo(() => {
     const list: MenuItem[] = user?.allowedMenus || [];
     console.log(`[LexWrit Sidebar] Dynamic Menu Engine: Hydrating ${list.length} menus from DB`);
@@ -44,7 +42,6 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
     return map;
   }, [user?.allowedMenus]);
 
-  // Auto-expand accordion if the current path matches one of its submenus
   useEffect(() => {
     if (!user?.allowedMenus) return;
     const updates: Record<string, boolean> = {};
@@ -88,7 +85,6 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
           isMobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        {/* Brand Header */}
         <div className="flex h-16 items-center justify-between border-b border-white/10 px-4">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white shadow-inner">
@@ -115,7 +111,6 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
           </Button>
         </div>
 
-        {/* Scrollable Dynamic Navigation */}
         <div className="flex-1 space-y-4 overflow-y-auto px-3 py-4 text-xs">
           {Object.keys(groupedMenus).length > 0 ? (
             Object.entries(groupedMenus).map(([groupTitle, menus]) => (
@@ -193,7 +188,6 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
                       );
                     }
 
-                    // Standard Single Menu Item
                     return (
                       <Link
                         key={menu.key}
@@ -222,7 +216,6 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
           )}
         </div>
 
-        {/* Dynamic Logged-in User Profile Card */}
         <div className="border-t border-white/10 p-3">
           <div className="flex items-center gap-3 rounded-lg bg-white/5 p-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow">
