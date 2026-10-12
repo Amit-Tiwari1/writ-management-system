@@ -9,11 +9,14 @@ import toast from "react-hot-toast";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { loginThunk, clearAuthError } from "@/store/slices/authSlice";
 import { loginSchema, LoginFormData } from "@/schemas/authSchema";
+import Link from "next/link";
 
 export default function LoginPage() {
   const router = useRouter();
   const dispatch = useAppDispatch();
-  const { isAuthenticated, isLoading, error } = useAppSelector((state) => state.auth);
+  const { isAuthenticated, isLoading, error } = useAppSelector(
+    (state) => state.auth,
+  );
   const [showPassword, setShowPassword] = useState(false);
   const [logoError, setLogoError] = useState(false);
 
@@ -41,13 +44,17 @@ export default function LoginPage() {
 
     if (loginThunk.fulfilled.match(resultAction)) {
       const officer = resultAction.payload.user;
-      toast.success(`Access Authorized: Welcome, ${officer.name || "Officer"}!`, {
-        icon: "🛡️",
-      });
+      toast.success(
+        `Access Authorized: Welcome, ${officer.name || "Officer"}!`,
+        {
+          icon: "🛡️",
+        },
+      );
       router.replace("/admin");
     } else {
       const errorMsg =
-        (resultAction.payload as string) || "Invalid credentials or unauthorized account.";
+        (resultAction.payload as string) ||
+        "Invalid credentials or unauthorized account.";
       toast.error(errorMsg);
     }
   };
@@ -70,7 +77,9 @@ export default function LoginPage() {
                     onError={() => setLogoError(true)}
                   />
                 ) : (
-                  <span className="material-symbols-rounded text-2xl text-blue-400">gavel</span>
+                  <span className="material-symbols-rounded text-2xl text-blue-400">
+                    gavel
+                  </span>
                 )}
               </div>
               <div>
@@ -88,22 +97,32 @@ export default function LoginPage() {
                 Writ & Compliance Management System
               </h2>
               <p className="text-xs leading-relaxed text-slate-300 line-clamp-4 sm:line-clamp-none">
-                Official secretariat case ledger for the Uttar Pradesh Police Recruitment and
-                Promotion Board. Tracking High Court petitions, stay orders, green-sheet notings,
-                and time-bound compliance radar.
+                Official secretariat case ledger for the Uttar Pradesh Police
+                Recruitment and Promotion Board. Tracking High Court petitions,
+                stay orders, green-sheet notings, and time-bound compliance
+                radar.
               </p>
             </div>
           </div>
 
           <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-3.5 backdrop-blur-md">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-300 font-medium">Judicial Gateway</span>
-              <Chip size="sm" color="success" variant="flat" className="h-5 text-[10px] font-bold">
+              <span className="text-slate-300 font-medium">
+                Judicial Gateway
+              </span>
+              <Chip
+                size="sm"
+                color="success"
+                variant="flat"
+                className="h-5 text-[10px] font-bold"
+              >
                 Online (180ms)
               </Chip>
             </div>
             <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-400">
-              <span className="material-symbols-rounded text-sm text-emerald-400">verified</span>
+              <span className="material-symbols-rounded text-sm text-emerald-400">
+                verified
+              </span>
               <span>SHA-256 Tamper-Evident Ledger Active</span>
             </div>
           </div>
@@ -112,19 +131,27 @@ export default function LoginPage() {
         <div className="flex flex-col justify-center bg-white p-6 sm:p-8 md:col-span-7 md:p-10">
           <div className="mb-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-900">Officer Secure Access</h2>
-              <Chip size="sm" className="bg-slate-100 text-[10px] font-mono font-semibold text-slate-700">
+              <h2 className="text-lg font-bold text-slate-900">
+                Officer Secure Access
+              </h2>
+              <Chip
+                size="sm"
+                className="bg-slate-100 text-[10px] font-mono font-semibold text-slate-700"
+              >
                 v2.0 Production
               </Chip>
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              Enter official board credentials to access the legal case repository
+              Enter official board credentials to access the legal case
+              repository
             </p>
           </div>
 
           {error && (
             <div className="mb-4 flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-800">
-              <span className="material-symbols-rounded text-sm text-rose-600">error</span>
+              <span className="material-symbols-rounded text-sm text-rose-600">
+                error
+              </span>
               <span className="font-medium">{error}</span>
             </div>
           )}
@@ -176,6 +203,7 @@ export default function LoginPage() {
                       : "border-slate-200 focus:border-blue-600 focus:ring-blue-600"
                   }`}
                 />
+              
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
@@ -193,6 +221,14 @@ export default function LoginPage() {
                 </p>
               )}
             </div>
+              <div className="flex justify-end pt-1">
+                  <Link
+                    href="/forgot-password"
+                    className="text-xs font-semibold text-blue-800 hover:text-blue-950 hover:underline"
+                  >
+                    Forgot Password?
+                  </Link>
+                </div>
 
             <Button
               type="submit"
@@ -202,7 +238,11 @@ export default function LoginPage() {
               isLoading={isLoading || isSubmitting}
               startContent={
                 !isLoading &&
-                !isSubmitting && <span className="material-symbols-rounded text-sm">login</span>
+                !isSubmitting && (
+                  <span className="material-symbols-rounded text-sm">
+                    login
+                  </span>
+                )
               }
             >
               Sign In to Legal Portal

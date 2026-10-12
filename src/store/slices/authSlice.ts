@@ -65,6 +65,8 @@ interface AuthState {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isRecoveryLoading: boolean;
+  recoveryMaskedEmail: string | null;
   error: string | null;
 }
 
@@ -72,7 +74,9 @@ const initialState: AuthState = {
   user: null,
   token: null,
   isAuthenticated: false,
-  isLoading: true, // App initial mount verify hone tak loading true rahegi
+  isLoading: true,
+  isRecoveryLoading: false,
+  recoveryMaskedEmail: null,
   error: null,
 };
 
@@ -84,7 +88,6 @@ export const loginThunk = createAsyncThunk(
       const response = await axiosClient.post("/auth/login", credentials);
       const { token, user } = response.data;
 
-      // Save token in cookie and localStorage
       Cookies.set("access_token", token, { expires: 7, sameSite: "lax" });
       if (typeof window !== "undefined") {
         localStorage.setItem("access_token", token);
@@ -103,7 +106,9 @@ export const fetchMeThunk = createAsyncThunk(
   "auth/fetchMeThunk",
   async (_, { rejectWithValue }) => {
     try {
-      const token = Cookies.get("access_token") || (typeof window !== "undefined" ? localStorage.getItem("access_token") : null);
+      const token =
+        Cookies.get("access_token") ||
+        (typeof window !== "undefined" ? localStorage.getItem("access_token") : null);
       if (!token) {
         return rejectWithValue("No token found");
       }
@@ -115,6 +120,37 @@ export const fetchMeThunk = createAsyncThunk(
         localStorage.removeItem("access_token");
       }
       return rejectWithValue(err.response?.data?.message || "Session expired");
+    }
+  }
+);
+
+// 3. Thunk: Forgot Password (Request 6-Digit OTP via Resend)
+export const forgotPasswordThunk = createAsyncThunk(
+  "auth/forgotPasswordThunk",
+  async (identifier: string, { rejectWithValue }) => {
+    try {
+      const response = await axiosClient.post("/auth/forgot-password", { identifier });
+      return response.data;
+    } catch (err: any) {
+      const msg = err.response?.data?.message || "Failed to dispatch verification code.";
+      return rejectWithValue(msg);
+    }
+  }
+);
+
+// 4. Thunk: Reset Password (Verify OTP & Commit New Password)
+export const resetPasswordThunk = createAsyncThunk(
+  "auth/resetPasswordThunk",
+  async (
+    payload: { identifier: string; otp: string; newPassword: string },
+    { rejectWithValue }
+  ) => {
+    try {
+      const response = await axiosClient.post("/auth/reset-password", payload);
+      return response.data;
+    } catch (err: any) {
+      const msg = err.response?.data?.message || "Password update verification failed.";
+      return rejectWithValue(msg);
     }
   }
 );
@@ -137,6 +173,10 @@ export const authSlice = createSlice({
     clearAuthError: (state) => {
       state.error = null;
     },
+    clearRecoveryState: (state) => {
+      state.isRecoveryLoading = false;
+      state.recoveryMaskedEmail = null;
+    },
   },
   extraReducers: (builder) => {
     // Login
@@ -144,13 +184,16 @@ export const authSlice = createSlice({
       state.isLoading = true;
       state.error = null;
     });
-    builder.addCase(loginThunk.fulfilled, (state, action: PayloadAction<{ token: string; user: UserProfile }>) => {
-      state.isLoading = false;
-      state.isAuthenticated = true;
-      state.token = action.payload.token;
-      state.user = action.payload.user;
-      state.error = null;
-    });
+    builder.addCase(
+      loginThunk.fulfilled,
+      (state, action: PayloadAction<{ token: string; user: UserProfile }>) => {
+        state.isLoading = false;
+        state.isAuthenticated = true;
+        state.token = action.payload.token;
+        state.user = action.payload.user;
+        state.error = null;
+      }
+    );
     builder.addCase(loginThunk.rejected, (state, action) => {
       state.isLoading = false;
       state.isAuthenticated = false;
@@ -161,20 +204,51 @@ export const authSlice = createSlice({
     builder.addCase(fetchMeThunk.pending, (state) => {
       state.isLoading = true;
     });
-    builder.addCase(fetchMeThunk.fulfilled, (state, action: PayloadAction<{ token: string; user: UserProfile }>) => {
-      state.isLoading = false;
-      state.isAuthenticated = true;
-      state.token = action.payload.token;
-      state.user = action.payload.user;
-    });
+    builder.addCase(
+      fetchMeThunk.fulfilled,
+      (state, action: PayloadAction<{ token: string; user: UserProfile }>) => {
+        state.isLoading = false;
+        state.isAuthenticated = true;
+        state.token = action.payload.token;
+        state.user = action.payload.user;
+      }
+    );
     builder.addCase(fetchMeThunk.rejected, (state) => {
       state.isLoading = false;
       state.isAuthenticated = false;
       state.user = null;
       state.token = null;
     });
+
+    // Forgot Password OTP
+    builder.addCase(forgotPasswordThunk.pending, (state) => {
+      state.isRecoveryLoading = true;
+      state.error = null;
+    });
+    builder.addCase(forgotPasswordThunk.fulfilled, (state, action) => {
+      state.isRecoveryLoading = false;
+      state.recoveryMaskedEmail = action.payload.maskedEmail || null;
+    });
+    builder.addCase(forgotPasswordThunk.rejected, (state, action) => {
+      state.isRecoveryLoading = false;
+      state.error = action.payload as string;
+    });
+
+    // Reset Password
+    builder.addCase(resetPasswordThunk.pending, (state) => {
+      state.isRecoveryLoading = true;
+      state.error = null;
+    });
+    builder.addCase(resetPasswordThunk.fulfilled, (state) => {
+      state.isRecoveryLoading = false;
+      state.recoveryMaskedEmail = null;
+    });
+    builder.addCase(resetPasswordThunk.rejected, (state, action) => {
+      state.isRecoveryLoading = false;
+      state.error = action.payload as string;
+    });
   },
 });
 
-export const { logoutAction, clearAuthError } = authSlice.actions;
+export const { logoutAction, clearAuthError, clearRecoveryState } = authSlice.actions;
 export default authSlice.reducer;
