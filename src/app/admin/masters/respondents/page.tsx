@@ -32,7 +32,6 @@ import toast from "react-hot-toast";
 import { MastersAPI } from "@/api/mastersApi";
 import { z } from "zod";
 
-// Strict 1:1 Schema for React Hook Form resolving
 const respondentGroupFormSchema = z.object({
   groupName: z
     .string()
@@ -74,14 +73,12 @@ export default function RespondentsMasterPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTypeFilter, setSelectedTypeFilter] = useState("ALL");
 
-  // Pagination
   const [page, setPage] = useState(1);
   const rowsPerPage = 8;
 
   const [editingItem, setEditingItem] = useState<IRespondentGroupItem | null>(null);
   const [itemToDelete, setItemToDelete] = useState<IRespondentGroupItem | null>(null);
 
-  // Hook Form for Add
   const {
     control: addControl,
     handleSubmit: handleAddSubmit,
@@ -97,7 +94,6 @@ export default function RespondentsMasterPage() {
     },
   });
 
-  // Hook Form for Edit
   const {
     control: editControl,
     handleSubmit: handleEditSubmit,
@@ -113,7 +109,6 @@ export default function RespondentsMasterPage() {
     },
   });
 
-  // Fetch from Backend API
   const fetchRespondentGroups = useCallback(async () => {
     try {
       setLoading(true);
@@ -134,7 +129,6 @@ export default function RespondentsMasterPage() {
     fetchRespondentGroups();
   }, [fetchRespondentGroups]);
 
-  // Handle Create
   const onAddGroup: SubmitHandler<RespondentGroupFormValues> = async (values) => {
     try {
       setSubmitting(true);
@@ -154,7 +148,6 @@ export default function RespondentsMasterPage() {
     }
   };
 
-  // Open Edit Modal
   const handleOpenEdit = (item: IRespondentGroupItem) => {
     setEditingItem(item);
     resetEditForm({
@@ -166,7 +159,6 @@ export default function RespondentsMasterPage() {
     onEditOpen();
   };
 
-  // Handle Edit Save
   const onUpdateGroup: SubmitHandler<RespondentGroupFormValues> = async (values) => {
     if (!editingItem) return;
     try {
@@ -184,13 +176,11 @@ export default function RespondentsMasterPage() {
     }
   };
 
-  // Open Delete Modal
   const handleOpenDelete = (item: IRespondentGroupItem) => {
     setItemToDelete(item);
     onDeleteOpen();
   };
 
-  // Confirm Delete
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
     try {
@@ -206,7 +196,6 @@ export default function RespondentsMasterPage() {
     }
   };
 
-  // Search & Filter
   const filteredRespondents = useMemo(() => {
     return respondents.filter((item) => {
       const matchesSearch =
@@ -223,7 +212,6 @@ export default function RespondentsMasterPage() {
     });
   }, [respondents, searchQuery, selectedTypeFilter]);
 
-  // Pagination calculation
   const totalPages = Math.ceil(filteredRespondents.length / rowsPerPage) || 1;
   const paginatedItems = useMemo(() => {
     const start = (page - 1) * rowsPerPage;
@@ -232,7 +220,6 @@ export default function RespondentsMasterPage() {
 
   return (
     <div className="space-y-4">
-      {/* 1. Header Information Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -268,7 +255,6 @@ export default function RespondentsMasterPage() {
             </Button>
           </div>
 
-          {/* Quick Filters */}
           <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
             <Input
               size="sm"
@@ -410,7 +396,6 @@ export default function RespondentsMasterPage() {
         </CardBody>
       </Card>
 
-      {/* MODAL 1: Add Respondent Group */}
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top" size="lg">
         <ModalContent>
           {(onClose) => (

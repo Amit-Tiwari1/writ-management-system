@@ -44,13 +44,11 @@ function ComplianceArchivalContent() {
   const { isOpen, onOpen, onOpenChange } = useDisclosure();
   const { isOpen: isViewerOpen, onOpen: onViewerOpen, onOpenChange: onViewerOpenChange } = useDisclosure();
 
-  // State
   const [archivedList, setArchivedList] = useState<ArchivedComplianceItem[]>([]);
   const [activeCases, setActiveCases] = useState<CaseItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Form State
   const [selectedCaseId, setSelectedCaseId] = useState<string>("");
   const [actionCategory, setActionCategory] = useState<string>("ORDER_DECIDED");
   const [narrativeSummary, setNarrativeSummary] = useState<string>(
@@ -59,7 +57,6 @@ function ComplianceArchivalContent() {
 
   const [viewingAffidavit, setViewingAffidavit] = useState<ArchivedComplianceItem | null>(null);
 
-  // 1. Load Real Archived Records & Active Cases from Backend
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -104,7 +101,6 @@ function ComplianceArchivalContent() {
     }));
   }, [activeCases]);
 
-  // 2. Submit Closeout to Backend
   const handleArchiveSubmit = async (onClose: () => void) => {
     if (!selectedCaseId) {
       toast.error("Please select a case to archive.");

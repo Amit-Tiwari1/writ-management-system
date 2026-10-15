@@ -30,11 +30,9 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
 
   const groupedMenus = useMemo(() => {
     const list: MenuItem[] = user?.allowedMenus || [];
-    console.log(`[LexWrit Sidebar] Dynamic Menu Engine: Hydrating ${list.length} menus from DB`);
-
     const map: Record<string, MenuItem[]> = {};
     list.forEach((menu) => {
-      const group = menu.groupTitle || "OPERATIONS";
+      const group = menu.groupTitle || "OPERATIONS & CASE HUB";
       if (!map[group]) map[group] = [];
       map[group].push(menu);
     });
@@ -63,7 +61,6 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
   }, [pathname, user?.allowedMenus]);
 
   const handleLogout = () => {
-    console.log("[LexWrit Sidebar] Sign-out triggered by:", user?.username);
     dispatch(logoutAction());
     toast.success("Logged out successfully.");
     router.replace("/");
@@ -75,29 +72,29 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
     <>
       {isMobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm lg:hidden"
           onClick={() => setIsMobileOpen(false)}
         />
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex h-full w-64 flex-col bg-[#0f2744] text-slate-200 transition-transform duration-200 ease-in-out lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex h-full w-72 flex-col bg-[#0b1d33] text-slate-100 shadow-xl transition-transform duration-200 ease-in-out lg:static lg:translate-x-0 ${
           isMobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex h-16 items-center justify-between border-b border-white/10 px-4">
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 px-4 bg-[#081729]">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white shadow-inner">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 text-sm font-extrabold text-white shadow">
               UP
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h1 className="text-xs font-bold uppercase tracking-wider text-white">UPPRPB</h1>
-                <Chip size="sm" className="h-4 bg-blue-500/20 px-1 text-[9px] font-bold text-blue-300 font-mono">
+                <h1 className="text-xs font-black uppercase tracking-wider text-white">UPPRPB</h1>
+                <Chip size="sm" className="h-4 bg-blue-500/25 px-1 text-[9px] font-bold text-blue-300 font-mono">
                   WCMS
                 </Chip>
               </div>
-              <p className="text-[10px] uppercase tracking-wider text-slate-400">Writ Legal Registry</p>
+              <p className="text-[10px] font-medium tracking-wider text-slate-400">Legal Registry</p>
             </div>
           </div>
           <Button
@@ -111,11 +108,11 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
           </Button>
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-3 py-4 text-xs">
+        <div className="flex-1 space-y-6 overflow-y-auto px-3.5 py-4 text-xs scrollbar-thin scrollbar-thumb-white/10">
           {Object.keys(groupedMenus).length > 0 ? (
             Object.entries(groupedMenus).map(([groupTitle, menus]) => (
-              <div key={groupTitle}>
-                <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400/80">
+              <div key={groupTitle} className="space-y-1.5">
+                <p className="px-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400/90">
                   {groupTitle}
                 </p>
                 <nav className="space-y-1">
@@ -127,25 +124,29 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
 
                     if (hasSubMenus) {
                       return (
-                        <div key={menu.key}>
+                        <div key={menu.key} className="space-y-0.5">
                           <button
                             type="button"
                             onClick={() => toggleAccordion(menu.key)}
-                            className="flex w-full items-center justify-between rounded-lg px-3 py-2 font-medium text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
+                            className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 transition-all ${
+                              isGroupOpen
+                                ? "bg-white/10 font-bold text-white shadow-sm"
+                                : "font-semibold text-slate-200 hover:bg-white/5 hover:text-white"
+                            }`}
                           >
-                            <div className="flex items-center gap-3">
-                              <span className="material-symbols-rounded text-lg text-slate-400">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="material-symbols-rounded text-lg shrink-0 text-slate-300">
                                 {menu.icon || "folder"}
                               </span>
-                              <span>{menu.label}</span>
+                              <span className="truncate text-xs">{menu.label}</span>
                             </div>
-                            <span className="material-symbols-rounded text-sm text-slate-400">
+                            <span className="material-symbols-rounded text-base shrink-0 text-slate-400 ml-1">
                               {isGroupOpen ? "expand_more" : "chevron_right"}
                             </span>
                           </button>
 
                           {isGroupOpen && (
-                            <div className="ml-5 mt-1 space-y-1 border-l border-white/10 pl-3">
+                            <div className="ml-4 mt-1 space-y-1 border-l-2 border-white/15 pl-2.5 py-0.5">
                               {menu.subMenus!.map((sub) => {
                                 const subActive = isActive(sub.path);
                                 return (
@@ -153,27 +154,27 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
                                     key={sub.key}
                                     href={sub.path}
                                     onClick={() => setIsMobileOpen(false)}
-                                    className={`flex items-center justify-between rounded-md px-2.5 py-1.5 transition-colors ${
+                                    className={`flex items-center justify-between rounded-md px-2.5 py-1.5 transition-all ${
                                       subActive
-                                        ? "bg-white/15 font-semibold text-white"
-                                        : "text-slate-400 hover:bg-white/5 hover:text-white"
+                                        ? "bg-blue-600 font-bold text-white shadow"
+                                        : "font-semibold text-slate-300 hover:bg-white/10 hover:text-white"
                                     }`}
                                   >
-                                    <div className="flex items-center gap-2 truncate">
-                                      <span className="material-symbols-rounded text-sm">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="material-symbols-rounded text-sm shrink-0 opacity-80">
                                         {sub.icon || "description"}
                                       </span>
-                                      <span className="truncate">{sub.label}</span>
+                                      <span className="truncate text-[11.5px] leading-tight">{sub.label}</span>
                                     </div>
                                     {sub.badge && (
                                       <Chip
                                         size="sm"
-                                        className={`h-4 px-1 text-[9px] font-bold ${
+                                        className={`h-4 shrink-0 px-1 text-[8px] font-bold ${
                                           sub.badgeColor === "danger"
                                             ? "bg-rose-500 text-white"
                                             : sub.badgeColor === "warning"
-                                            ? "bg-amber-500/20 text-amber-300"
-                                            : "bg-blue-500/20 text-blue-300"
+                                            ? "bg-amber-500/25 text-amber-200"
+                                            : "bg-blue-500/25 text-blue-200"
                                         }`}
                                       >
                                         {sub.badge}
@@ -193,16 +194,16 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
                         key={menu.key}
                         href={menu.path}
                         onClick={() => setIsMobileOpen(false)}
-                        className={`flex items-center gap-3 rounded-lg px-3 py-2 font-medium transition-colors ${
+                        className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition-all ${
                           menuActive
-                            ? "bg-white/15 font-semibold text-white shadow-sm"
-                            : "text-slate-300 hover:bg-white/5 hover:text-white"
+                            ? "bg-blue-600 font-bold text-white shadow"
+                            : "font-semibold text-slate-200 hover:bg-white/5 hover:text-white"
                         }`}
                       >
-                        <span className="material-symbols-rounded text-lg">
+                        <span className="material-symbols-rounded text-lg shrink-0">
                           {menu.icon || "grid_view"}
                         </span>
-                        <span>{menu.label}</span>
+                        <span className="truncate text-xs">{menu.label}</span>
                       </Link>
                     );
                   })}
@@ -216,21 +217,21 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
           )}
         </div>
 
-        <div className="border-t border-white/10 p-3">
-          <div className="flex items-center gap-3 rounded-lg bg-white/5 p-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow">
+        <div className="border-t border-white/10 p-3 bg-[#081729]">
+          <div className="flex items-center gap-2.5 rounded-lg bg-white/5 p-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-xs font-black text-white shadow">
               {userInitial}
             </div>
-            <div className="flex-1 overflow-hidden">
-              <p className="truncate text-xs font-semibold text-white">{user?.name || "Officer"}</p>
-              <p className="truncate text-[10px] text-slate-400">
+            <div className="flex-1 min-w-0">
+              <p className="truncate text-xs font-bold text-white">{user?.name || "Officer"}</p>
+              <p className="truncate text-[10px] font-medium text-slate-400">
                 {user?.designation || user?.role || "Board Cadre"}
               </p>
             </div>
             <button
               onClick={handleLogout}
               title="Sign Out"
-              className="text-slate-400 hover:text-rose-400 transition-colors"
+              className="text-slate-400 hover:text-rose-400 transition-colors p-1"
             >
               <span className="material-symbols-rounded text-lg">logout</span>
             </button>

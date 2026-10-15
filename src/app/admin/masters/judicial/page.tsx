@@ -69,7 +69,6 @@ export default function JudicialMasterPage() {
   const { isOpen: isAddTypeOpen, onOpen: onAddTypeOpen, onOpenChange: onAddTypeOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
 
-  // Add Form Inputs
   const [newCaseType, setNewCaseType] = useState({
     courtId: "",
     caseTypeName: "",
@@ -85,7 +84,6 @@ export default function JudicialMasterPage() {
 
   const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string; kind: "COURT" | "CASE_TYPE" } | null>(null);
 
-  // Load Judicial Data from Backend
   const loadJudicialData = useCallback(async () => {
     setLoading(true);
     try {
@@ -112,7 +110,6 @@ export default function JudicialMasterPage() {
     loadJudicialData();
   }, [loadJudicialData]);
 
-  // Dynamic filter items for Court selection
   const courtFilterItems = useMemo(() => {
     return [
       { key: "ALL", label: "All Judicial Establishments" },
@@ -130,7 +127,6 @@ export default function JudicialMasterPage() {
     }));
   }, [courts]);
 
-  // Open Add Case Type Modal with Default Court
   const handleOpenAddType = () => {
     setNewCaseType({
       courtId: courts[0]?._id || "",
@@ -140,7 +136,6 @@ export default function JudicialMasterPage() {
     onAddTypeOpen();
   };
 
-  // Open Add Court Modal
   const handleOpenAddCourt = () => {
     setNewCourt({
       courtName: "",
@@ -151,7 +146,6 @@ export default function JudicialMasterPage() {
     onAddCourtOpen();
   };
 
-  // Add Case Type Handler
   const handleAddCaseType = async () => {
     if (!newCaseType.courtId || !newCaseType.caseTypeName.trim() || !newCaseType.shortName.trim()) {
       toast.error("Court selection, Case Type Name, and Short Name are required");
@@ -179,7 +173,6 @@ export default function JudicialMasterPage() {
     }
   };
 
-  // Add Court Handler
   const handleAddCourt = async () => {
     if (!newCourt.courtName.trim() || !newCourt.shortCode.trim() || !newCourt.location.trim()) {
       toast.error("Court Name, Short Code, and Location Bench are required");
@@ -208,7 +201,6 @@ export default function JudicialMasterPage() {
     }
   };
 
-  // Delete Handler
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
     setIsSubmitting(true);

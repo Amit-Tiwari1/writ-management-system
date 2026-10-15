@@ -89,7 +89,6 @@ export default function RankMasterPage() {
   const [editingRank, setEditingRank] = useState<RankRecord | null>(null);
   const [rankToDelete, setRankToDelete] = useState<RankRecord | null>(null);
 
-  // React Hook Form for Add
   const {
     control: addControl,
     handleSubmit: handleAddSubmit,
@@ -105,7 +104,6 @@ export default function RankMasterPage() {
     },
   });
 
-  // React Hook Form for Edit
   const {
     control: editControl,
     handleSubmit: handleEditSubmit,
@@ -121,7 +119,6 @@ export default function RankMasterPage() {
     },
   });
 
-  // Fetch Ranks from Real Backend API
   const fetchRanks = useCallback(async () => {
     setLoading(true);
     try {
@@ -151,7 +148,6 @@ export default function RankMasterPage() {
     onAddOpen();
   };
 
-  // Submit Add to Backend
   const onAddRank: SubmitHandler<RankFormValues> = async (values) => {
     setIsSubmitting(true);
     try {

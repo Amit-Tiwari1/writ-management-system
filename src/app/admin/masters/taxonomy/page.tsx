@@ -78,7 +78,6 @@ export default function TaxonomyMasterPage() {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Modal State
   const [formData, setFormData] = useState({
     mode: "SUBJECT" as "CATEGORY" | "SUB_CATEGORY" | "SUBJECT",
     categoryId: "",
@@ -91,7 +90,6 @@ export default function TaxonomyMasterPage() {
 
   const [itemToDelete, setItemToDelete] = useState<any>(null);
 
-  // Load all taxonomy data from backend
   const loadTaxonomyData = useCallback(async () => {
     setLoading(true);
     try {
@@ -116,7 +114,6 @@ export default function TaxonomyMasterPage() {
     loadTaxonomyData();
   }, [loadTaxonomyData]);
 
-  // Dynamic filter items for categories
   const categoryFilterItems = useMemo(() => {
     return [
       { key: "ALL", label: "All Master Categories" },
@@ -134,7 +131,6 @@ export default function TaxonomyMasterPage() {
     }));
   }, [categories]);
 
-  // Cascading Sub-Categories in modal
   const availableSubCategories = useMemo(() => {
     if (!formData.categoryId) return [];
     return subCategories
@@ -161,7 +157,6 @@ export default function TaxonomyMasterPage() {
     onAddOpen();
   };
 
-  // Submit Handler for Add
   const handleAdd = async () => {
     setIsSubmitting(true);
     try {

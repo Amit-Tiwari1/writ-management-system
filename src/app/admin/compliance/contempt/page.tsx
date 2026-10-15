@@ -41,7 +41,6 @@ export default function ContemptRadarPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [isAlertSending, setIsAlertSending] = useState<boolean>(false);
 
-  // 1. Fetch Real Contempt Risk Radar Data from Backend
   const loadContemptData = useCallback(async () => {
     setLoading(true);
     try {
@@ -62,7 +61,6 @@ export default function ContemptRadarPage() {
     loadContemptData();
   }, [loadContemptData]);
 
-  // 2. Trigger Level-3 Emergency SMS/Email Broadcast via Backend
   const handleSendEscalations = async () => {
     setIsAlertSending(true);
     try {
@@ -83,7 +81,6 @@ export default function ContemptRadarPage() {
 
   return (
     <div className="space-y-4">
-      {/* Header Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -116,7 +113,6 @@ export default function ContemptRadarPage() {
             </div>
           </div>
 
-          {/* 3-Level Automated Escalation Pathway Indicator */}
           <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
             <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
               <div className="flex justify-between items-center">
@@ -157,7 +153,6 @@ export default function ContemptRadarPage() {
         </CardBody>
       </Card>
 
-      {/* Main Table Grid */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
           <Table removeWrapper aria-label="Contempt cases radar table" className="min-w-full">
@@ -281,7 +276,6 @@ export default function ContemptRadarPage() {
         </CardBody>
       </Card>
 
-      {/* Red-Zone SMS Broadcast Modal */}
       <Modal isOpen={isAlertOpen} onOpenChange={onAlertOpenChange} placement="top" size="md">
         <ModalContent>
           {(onClose) => (

@@ -32,25 +32,20 @@ export default function LocationMasterPage() {
   const [activeTab, setActiveTab] = useState<string>("districts");
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Master Data Lists
   const [states, setStates] = useState<any[]>([]);
   const [zones, setZones] = useState<any[]>([]);
   const [ranges, setRanges] = useState<any[]>([]);
   const [districts, setDistricts] = useState<any[]>([]);
 
-  // Search Filter
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Modal Disclosures
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
 
-  // Active form data & item to delete
   const [formData, setFormData] = useState<any>({});
   const [itemToDelete, setItemToDelete] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Load All Location Levels from Backend
   const loadLocationData = useCallback(async () => {
     setLoading(true);
     try {
@@ -76,7 +71,6 @@ export default function LocationMasterPage() {
     loadLocationData();
   }, [loadLocationData]);
 
-  // Open Add Modal with clean state
   const handleOpenAdd = () => {
     setFormData({
       stateId: states[0]?._id || "",
@@ -92,7 +86,6 @@ export default function LocationMasterPage() {
     onAddOpen();
   };
 
-  // Submit Handler for Add
   const handleSubmitAdd = async () => {
     setIsSubmitting(true);
     try {
@@ -151,7 +144,6 @@ export default function LocationMasterPage() {
     }
   };
 
-  // Delete Handler
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
     setIsSubmitting(true);
@@ -174,7 +166,6 @@ export default function LocationMasterPage() {
     }
   };
 
-  // Cascading Helpers
   const filteredZones = zones.filter((z) => !formData.stateId || z.stateId?._id === formData.stateId || z.stateId === formData.stateId);
   const filteredRanges = ranges.filter((r) => !formData.zoneId || r.zoneId?._id === formData.zoneId || r.zoneId === formData.zoneId);
 

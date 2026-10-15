@@ -86,7 +86,6 @@ export default function DesignationMasterPage() {
   const [editingItem, setEditingItem] = useState<DesignationRecord | null>(null);
   const [itemToDelete, setItemToDelete] = useState<DesignationRecord | null>(null);
 
-  // Fetch Designations from Backend
   const fetchDesignations = useCallback(async () => {
     setLoading(true);
     try {
@@ -117,7 +116,6 @@ export default function DesignationMasterPage() {
     onAddOpen();
   };
 
-  // Submit Add to Backend
   const handleAdd = async () => {
     if (!formData.title.trim()) {
       toast.error("Designation title is required!");

@@ -35,20 +35,17 @@ export default function WritAppLayout({ children }: { children: React.ReactNode 
 
   const { user, isAuthenticated, isLoading } = useAppSelector((state) => state.auth);
 
-  // 🚀 Read directly from Redux Store
   const {
     items: notifications,
     unreadCount,
     isLoading: isNotifLoading,
   } = useAppSelector((state) => state.notifications);
 
-  // Initial load and interval poller via Redux actions
   useEffect(() => {
     if (isAuthenticated && user) {
       dispatch(fetchUnreadCount());
       dispatch(fetchNotificationsList({ limit: 8 }));
 
-      // 30 seconds interval poller
       const interval = setInterval(() => {
         dispatch(fetchUnreadCount());
       }, 30000);
@@ -57,7 +54,6 @@ export default function WritAppLayout({ children }: { children: React.ReactNode 
     }
   }, [isAuthenticated, user, dispatch]);
 
-  // Click on single notification -> Mark read & route
   const handleNotificationClick = (notif: NotificationItem) => {
     if (!notif.isRead) {
       dispatch(markNotificationAsRead(notif._id));
@@ -79,7 +75,6 @@ export default function WritAppLayout({ children }: { children: React.ReactNode 
     }
   };
 
-  // Mark all as read via Redux
   const handleMarkAllRead = () => {
     dispatch(markAllNotificationsAsRead())
       .unwrap()
@@ -87,14 +82,12 @@ export default function WritAppLayout({ children }: { children: React.ReactNode 
       .catch(() => toast.error("Failed to mark all as read"));
   };
 
-  // Navigation Guard Effect
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.replace("/");
     }
   }, [isLoading, isAuthenticated, router]);
 
-  // Dynamic Header Title & Subtitle
   const meta = useMemo(() => {
     if (!user?.allowedMenus) {
       return { title: "UPPRPB Legal Portal", sub: "Writ Case Management System" };
@@ -187,7 +180,6 @@ export default function WritAppLayout({ children }: { children: React.ReactNode 
               />
             </div>
 
-            {/* NOTIFICATION BELL WITH BADGE & DROPDOWN DRAWER */}
             <Dropdown placement="bottom-end">
               <Badge
                 content={unreadCount > 0 ? unreadCount : null}

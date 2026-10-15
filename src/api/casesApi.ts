@@ -99,6 +99,22 @@ export interface LinkDiscoveredPayload {
   itemNo?: string;
   listingDate?: string;
 }
+export interface DropdownWritItem {
+  id: string;
+  fileNo: string;
+  writNumber: string;
+  label: string;
+  petitioner: string;
+  court: string;
+  stage: string;
+  oic: string;
+}
+
+export interface DropdownWritsResponse {
+  success: boolean;
+  count: number;
+  data: DropdownWritItem[];
+}
 
 export const CasesAPI = {
   getCases: async (params: CaseFilterQuery): Promise<CasesListResponse> => {
@@ -116,7 +132,6 @@ export const CasesAPI = {
     return res.data;
   },
 
-  // 2.4 Inward Discovery Desk Methods
   getUnclaimedDiscovery: async () => {
     const res = await axiosClient.get("/discovery/unclaimed");
     return res.data;
@@ -134,6 +149,10 @@ export const CasesAPI = {
 
   uploadCauseListPdf: async (formData: FormData) => {
     const res = await axiosClient.post("/discovery/upload-pdf-causelist", formData);
+    return res.data;
+  },
+  getDropdownWritsList: async (): Promise<DropdownWritsResponse> => {
+    const res = await axiosClient.get("/cases/dropdown-list");
     return res.data;
   },
 };

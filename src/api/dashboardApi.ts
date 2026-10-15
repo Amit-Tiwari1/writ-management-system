@@ -128,13 +128,11 @@ export interface CalendarHeatmapResponse {
 }
 
 export const DashboardAPI = {
-  // 1. Top 4 High-Level KPI Cards
   getKpis: async (): Promise<DashboardKpisResponse> => {
     const res = await axiosClient.get("/dashboard/kpis");
     return res.data;
   },
 
-  // 2. Multi-Dimensional Writ Classification Matrix
   getMatrix: async (params?: {
     wing?: string;
     courtCode?: string;
@@ -144,19 +142,16 @@ export const DashboardAPI = {
     return res.data;
   },
 
-  // 3. Court Forum Breakdown
   getCourtDistribution: async (): Promise<CourtDistributionResponse> => {
     const res = await axiosClient.get("/dashboard/court-distribution");
     return res.data;
   },
 
-  // 4. OIC Pending Workload Roster
   getOicWorkload: async (): Promise<OicWorkloadResponse> => {
     const res = await axiosClient.get("/dashboard/oic-workload");
     return res.data;
   },
 
-  // 5. Monthly Hearing Calendar Heatmap
   getCalendarHeatmap: async (params?: {
     month?: number;
     year?: number;

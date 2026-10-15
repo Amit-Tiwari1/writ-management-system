@@ -24,7 +24,6 @@ import toast from "react-hot-toast";
 import { ReportsAPI, ReportItem } from "@/api/reportsApi";
 import { MastersAPI } from "@/api/mastersApi";
 
-// Pre-defined Institutional MIS Report Cards
 const REPORT_CARDS = [
   {
     key: "HEARING_DATE_RANGE",
@@ -95,17 +94,14 @@ const REPORT_CARDS = [
 export default function MisReportsPage() {
   const [selectedReport, setSelectedReport] = useState<string>("HEARING_DATE_RANGE");
 
-  // Filters State
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [selectedCourt, setSelectedCourt] = useState<string>("ALL");
   const [selectedWing, setSelectedWing] = useState<string>("ALL");
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
 
-  // Masters Dropdowns
   const [dropdowns, setDropdowns] = useState<any>(null);
 
-  // Table & Pagination State
   const [reportData, setReportData] = useState<ReportItem[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [totalPages, setTotalPages] = useState<number>(1);
@@ -115,7 +111,6 @@ export default function MisReportsPage() {
   const [downloadingExcel, setDownloadingExcel] = useState<boolean>(false);
   const [downloadingPdf, setDownloadingPdf] = useState<boolean>(false);
 
-  // 1. Load Dropdowns
   useEffect(() => {
     async function loadMasters() {
       try {
@@ -128,7 +123,6 @@ export default function MisReportsPage() {
     loadMasters();
   }, []);
 
-  // 2. Fetch Report Data
   const loadReport = useCallback(async () => {
     setLoading(true);
     try {
@@ -162,7 +156,6 @@ export default function MisReportsPage() {
     loadReport();
   }, [loadReport]);
 
-  // Download Excel
   const handleDownloadExcel = async () => {
     setDownloadingExcel(true);
     try {
@@ -184,7 +177,6 @@ export default function MisReportsPage() {
     }
   };
 
-  // Download Watermarked PDF
   const handleDownloadPdf = async () => {
     setDownloadingPdf(true);
     try {

@@ -31,18 +31,15 @@ import { CasesAPI } from "@/api/casesApi";
 export default function WritDashboardPage() {
   const router = useRouter();
 
-  // Filters State
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
   const [selectedCourt, setSelectedCourt] = useState<string>("ALL");
   const [selectedYear, setSelectedYear] = useState<string>("2026");
 
-  // Calendar Navigation State
   const [currentYear, setCurrentYear] = useState<number>(2026);
   const [currentMonth, setCurrentMonth] = useState<number>(8); // 8 = September
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>("Today, 13:20 IST");
 
-  // Live Backend Data States
   const [kpis, setKpis] = useState<any>(null);
   const [matrixRows, setMatrixRows] = useState<MatrixRowItem[]>([]);
   const [matrixSummary, setMatrixSummary] = useState<MatrixSummary | null>(null);
@@ -50,13 +47,11 @@ export default function WritDashboardPage() {
   const [oicWorkload, setOicWorkload] = useState<OicWorkloadItem[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<Record<number, CalendarDayItem>>({});
 
-  // Loading States
   const [loadingKpis, setLoadingKpis] = useState<boolean>(true);
   const [loadingMatrix, setLoadingMatrix] = useState<boolean>(true);
   const [loadingCourts, setLoadingCourts] = useState<boolean>(true);
   const [loadingOic, setLoadingOic] = useState<boolean>(true);
 
-  // 1. Fetch Top KPIs
   const loadKpis = useCallback(async () => {
     setLoadingKpis(true);
     try {
@@ -69,7 +64,6 @@ export default function WritDashboardPage() {
     }
   }, []);
 
-  // 2. Fetch Classification Matrix with Active Filters
   const loadMatrix = useCallback(async () => {
     setLoadingMatrix(true);
     try {
@@ -89,7 +83,6 @@ export default function WritDashboardPage() {
     }
   }, [selectedCategory, selectedCourt, selectedYear]);
 
-  // 3. Fetch Court Forum Distribution
   const loadCourtDistribution = useCallback(async () => {
     setLoadingCourts(true);
     try {
@@ -102,7 +95,6 @@ export default function WritDashboardPage() {
     }
   }, []);
 
-  // 4. Fetch OIC Pending Workload Roster
   const loadOicWorkload = useCallback(async () => {
     setLoadingOic(true);
     try {
@@ -115,7 +107,6 @@ export default function WritDashboardPage() {
     }
   }, []);
 
-  // 5. Fetch Monthly Hearing Calendar
   const loadCalendar = useCallback(async () => {
     try {
       const res = await DashboardAPI.getCalendarHeatmap({
@@ -148,7 +139,6 @@ export default function WritDashboardPage() {
     loadCalendar();
   }, [loadCalendar]);
 
-  // Calendar Calculation
   const miniCalendarData = useMemo(() => {
     const firstDayIndex = new Date(currentYear, currentMonth, 1).getDay();
     const totalDaysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
@@ -172,13 +162,11 @@ export default function WritDashboardPage() {
     return { monthName, days };
   }, [currentYear, currentMonth, calendarEvents]);
 
-  // Click on Calendar Date -> Redirects to 2.1 Cases Register
   const handleCalendarClick = (dateStr: string | null, count: number | undefined) => {
     if (!dateStr || !count || count === 0) return;
     router.push(`/admin/cases?hearingDate=${dateStr}`);
   };
 
-  // Click on Matrix Cell -> Redirects to 2.1 Cases Register
   const handleCellClick = (caseType: string, statusKey: string) => {
     router.push(
       `/admin/cases?category=${selectedCategory}&court=${selectedCourt}&year=${selectedYear}&caseType=${encodeURIComponent(
@@ -187,7 +175,6 @@ export default function WritDashboardPage() {
     );
   };
 
-  // Live eCourts Sync Trigger
   const handleSyncNow = async () => {
     setIsSyncing(true);
     try {
@@ -209,9 +196,7 @@ export default function WritDashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* ROW 1: 4 MASTER KPI TILES */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Card 1: Active Writs */}
         <Card shadow="none" className="border border-slate-200/80 bg-white">
           <CardBody className="p-4">
             <div className="flex items-center justify-between">
@@ -233,7 +218,6 @@ export default function WritDashboardPage() {
           </CardBody>
         </Card>
 
-        {/* Card 2: Pending in Court */}
         <Card shadow="none" className="border border-slate-200/80 bg-white">
           <CardBody className="p-4">
             <div className="flex items-center justify-between">
@@ -255,7 +239,6 @@ export default function WritDashboardPage() {
           </CardBody>
         </Card>
 
-        {/* Card 3: Action in Board */}
         <Card shadow="none" className="border border-slate-200/80 bg-white">
           <CardBody className="p-4">
             <div className="flex items-center justify-between">
@@ -277,7 +260,6 @@ export default function WritDashboardPage() {
           </CardBody>
         </Card>
 
-        {/* Card 4: Compliance Rate */}
         <Card shadow="none" className="border border-slate-200/80 bg-white">
           <CardBody className="p-4">
             <div className="flex items-center justify-between">
@@ -304,11 +286,8 @@ export default function WritDashboardPage() {
         </Card>
       </div>
 
-      {/* ROW 2: MASTER-ALIGNED FILTERS & AT-A-GLANCE MATRIX */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
-        {/* Dynamic Category Tabs & Master Dropdowns Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-slate-50/50 px-5 py-3">
-          {/* Taxonomy Category Filter Tabs */}
           <div className="flex flex-wrap items-center gap-1.5">
             {[
               { key: "ALL", label: "ALL WRITS" },
@@ -332,7 +311,6 @@ export default function WritDashboardPage() {
             ))}
           </div>
 
-          {/* Court Master & Year Filters */}
           <div className="flex items-center gap-2">
             <Dropdown>
               <DropdownTrigger>
@@ -388,7 +366,6 @@ export default function WritDashboardPage() {
           </div>
         </div>
 
-        {/* Dynamic Slicing Table */}
         <CardBody className="overflow-x-auto p-0">
           <table className="w-full border-collapse text-left text-xs">
             <thead>
@@ -515,7 +492,6 @@ export default function WritDashboardPage() {
                 </tr>
               )}
 
-              {/* Total Aggregate Summary Row */}
               {matrixSummary && (
                 <tr className="border-t-2 border-slate-300 bg-slate-100 font-extrabold text-slate-900">
                   <td className="border-r border-slate-300 p-2.5 uppercase tracking-wide">
@@ -542,11 +518,8 @@ export default function WritDashboardPage() {
         </CardBody>
       </Card>
 
-      {/* ROW 3: COURTS & USER-WISE WORKLOAD + HOVER TOOLTIP CALENDAR */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {/* Left 2 Cols: Judicial Benches & User-Wise Workload Table */}
         <div className="space-y-4 lg:col-span-2">
-          {/* Court Forum Distribution Cards */}
           <Card shadow="none" className="border border-slate-200/80 bg-white">
             <div className="flex items-center justify-between border-b border-slate-100 p-3.5">
               <div className="flex items-center gap-2">
@@ -586,7 +559,6 @@ export default function WritDashboardPage() {
             </CardBody>
           </Card>
 
-          {/* User-Wise Pending Actions (OIC Workload Roster) */}
           <Card shadow="none" className="border border-slate-200/80 bg-white">
             <div className="flex items-center justify-between border-b border-slate-100 p-3.5">
               <div className="flex items-center gap-2">
@@ -660,7 +632,6 @@ export default function WritDashboardPage() {
           </Card>
         </div>
 
-        {/* Right 1 Col: Mini-Calendar Heatmap */}
         <div className="space-y-4">
           <Card shadow="none" className="border border-slate-200/80 bg-white">
             <div className="flex items-center justify-between border-b border-slate-100 p-3">
@@ -768,7 +739,6 @@ export default function WritDashboardPage() {
                 })}
               </div>
 
-              {/* Calendar Footer Info & Live Sync Action */}
               <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 text-[10px] text-slate-500">
                 <span className="flex items-center gap-1">
                   <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
@@ -786,7 +756,6 @@ export default function WritDashboardPage() {
             </CardBody>
           </Card>
 
-          {/* Operational Desks Quick Shortcuts */}
           <Card shadow="none" className="border border-slate-200/80 bg-white">
             <CardBody className="p-3.5">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">Operational Desks</h4>

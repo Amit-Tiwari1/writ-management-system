@@ -15,7 +15,6 @@ const initialState: MastersState = {
   lastFetchedAt: null,
 };
 
-// Async Thunk: Fast Initial Dropdown Bundle Fetch
 export const fetchIntakeDropdowns = createAsyncThunk(
   "masters/fetchIntakeDropdowns",
   async (_, { rejectWithValue }) => {

@@ -80,7 +80,6 @@ const initialState: AuthState = {
   error: null,
 };
 
-// 1. Thunk: User Login
 export const loginThunk = createAsyncThunk(
   "auth/loginThunk",
   async (credentials: LoginFormData, { rejectWithValue }) => {
@@ -101,7 +100,6 @@ export const loginThunk = createAsyncThunk(
   }
 );
 
-// 2. Thunk: Hydrate Current Logged In User (/auth/me)
 export const fetchMeThunk = createAsyncThunk(
   "auth/fetchMeThunk",
   async (_, { rejectWithValue }) => {
@@ -124,7 +122,6 @@ export const fetchMeThunk = createAsyncThunk(
   }
 );
 
-// 3. Thunk: Forgot Password (Request 6-Digit OTP via Resend)
 export const forgotPasswordThunk = createAsyncThunk(
   "auth/forgotPasswordThunk",
   async (identifier: string, { rejectWithValue }) => {
@@ -138,7 +135,6 @@ export const forgotPasswordThunk = createAsyncThunk(
   }
 );
 
-// 4. Thunk: Reset Password (Verify OTP & Commit New Password)
 export const resetPasswordThunk = createAsyncThunk(
   "auth/resetPasswordThunk",
   async (
@@ -179,7 +175,6 @@ export const authSlice = createSlice({
     },
   },
   extraReducers: (builder) => {
-    // Login
     builder.addCase(loginThunk.pending, (state) => {
       state.isLoading = true;
       state.error = null;
@@ -200,7 +195,6 @@ export const authSlice = createSlice({
       state.error = action.payload as string;
     });
 
-    // Fetch Me
     builder.addCase(fetchMeThunk.pending, (state) => {
       state.isLoading = true;
     });
@@ -220,7 +214,6 @@ export const authSlice = createSlice({
       state.token = null;
     });
 
-    // Forgot Password OTP
     builder.addCase(forgotPasswordThunk.pending, (state) => {
       state.isRecoveryLoading = true;
       state.error = null;
@@ -234,7 +227,6 @@ export const authSlice = createSlice({
       state.error = action.payload as string;
     });
 
-    // Reset Password
     builder.addCase(resetPasswordThunk.pending, (state) => {
       state.isRecoveryLoading = true;
       state.error = null;

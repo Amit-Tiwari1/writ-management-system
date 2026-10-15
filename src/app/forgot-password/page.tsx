@@ -26,7 +26,6 @@ export default function ForgotPasswordPage() {
   const [newPassword, setNewPassword] = useState<string>("");
   const [confirmPassword, setConfirmPassword] = useState<string>("");
 
-  // Step 1: Request 6-digit OTP
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanId = identifier.trim();
@@ -44,7 +43,6 @@ export default function ForgotPasswordPage() {
     }
   };
 
-  // Step 2: Verify OTP & Commit New Password
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanOtp = otp.trim();

@@ -32,7 +32,6 @@ import toast from "react-hot-toast";
 import { MastersAPI } from "@/api/mastersApi";
 import { z } from "zod";
 
-// Explicit non-defaulted schemas for direct 1:1 type inference with React Hook Form
 const aliasFormSchema = z.object({
   keyword: z.string().min(2, "Keyword is required").trim(),
   language: z.string().min(1, "Language is required"),
@@ -82,7 +81,6 @@ export default function AliasesMasterPage() {
   const [standingCounsels, setStandingCounsels] = useState<IStandingCounselItem[]>([]);
   const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string; type: "KEYWORD" | "ADVOCATE" } | null>(null);
 
-  // Form for Alias Variant
   const {
     control: aliasControl,
     handleSubmit: handleAliasSubmit,
@@ -98,7 +96,6 @@ export default function AliasesMasterPage() {
     },
   });
 
-  // Form for Standing Counsel
   const {
     control: advocateControl,
     handleSubmit: handleAdvocateSubmit,
@@ -113,7 +110,6 @@ export default function AliasesMasterPage() {
     },
   });
 
-  // Fetch Aliases and Counsels from Backend
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -133,7 +129,6 @@ export default function AliasesMasterPage() {
     fetchData();
   }, [fetchData]);
 
-  // Handle Add Alias Variant
   const onAddKeyword: SubmitHandler<AliasFormValues> = async (values) => {
     try {
       setSubmitting(true);
@@ -153,7 +148,6 @@ export default function AliasesMasterPage() {
     }
   };
 
-  // Handle Add Standing Counsel
   const onAddAdvocate: SubmitHandler<StandingCounselFormValues> = async (values) => {
     try {
       setSubmitting(true);
@@ -174,7 +168,6 @@ export default function AliasesMasterPage() {
     }
   };
 
-  // Delete Handlers
   const handleOpenDelete = (item: { _id: string; keyword?: string; name?: string }, type: "KEYWORD" | "ADVOCATE") => {
     setItemToDelete({
       id: item._id,

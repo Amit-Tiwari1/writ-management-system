@@ -121,7 +121,6 @@ export default function CaseIntakeWizardPage() {
   const watchCaseNumber = watch("caseNumber");
   const watchCaseYear = watch("caseYear");
 
-  // Load Masters & Staff Directory for OIC selection
   useEffect(() => {
     async function loadData() {
       try {
@@ -142,7 +141,6 @@ export default function CaseIntakeWizardPage() {
 
         if (usersRes?.success && Array.isArray(usersRes.data)) {
           setStaffUsers(usersRes.data);
-          // Set first officer as default if available
           if (usersRes.data.length > 0) {
             setValue("assignedOIC", usersRes.data[0].officerName);
             setValue("assignedPairokar", usersRes.data[0].officerName);

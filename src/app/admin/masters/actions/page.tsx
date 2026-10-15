@@ -33,7 +33,6 @@ import toast from "react-hot-toast";
 import { MastersAPI } from "@/api/mastersApi";
 import { z } from "zod";
 
-// Explicit non-defaulted schema for 1:1 React Hook Form resolution
 const actionMappingFormSchema = z.object({
   courtDecision: z.string().min(2, "Court decision is required").trim(),
   actionStatus: z.string().min(2, "Action status is required").trim(),
@@ -68,14 +67,12 @@ export default function ActionTakenMasterPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDeadlineFilter, setSelectedDeadlineFilter] = useState("ALL");
 
-  // Pagination state
   const [page, setPage] = useState(1);
   const rowsPerPage = 8;
 
   const [editingItem, setEditingItem] = useState<IActionMappingItem | null>(null);
   const [itemToDelete, setItemToDelete] = useState<IActionMappingItem | null>(null);
 
-  // Hook Form: Add
   const {
     control: addControl,
     handleSubmit: handleAddSubmit,
@@ -94,7 +91,6 @@ export default function ActionTakenMasterPage() {
     },
   });
 
-  // Hook Form: Edit
   const {
     control: editControl,
     handleSubmit: handleEditSubmit,
@@ -116,7 +112,6 @@ export default function ActionTakenMasterPage() {
   const addRequiresDeadline = watchAddForm("requiresComplianceDeadline");
   const editRequiresDeadline = watchEditForm("requiresComplianceDeadline");
 
-  // Fetch from backend API
   const fetchActionMappings = useCallback(async () => {
     try {
       setLoading(true);
@@ -137,7 +132,6 @@ export default function ActionTakenMasterPage() {
     fetchActionMappings();
   }, [fetchActionMappings]);
 
-  // Handle Add Form Submission
   const onAddRule: SubmitHandler<ActionMappingFormValues> = async (values) => {
     try {
       setSubmitting(true);
@@ -164,7 +158,6 @@ export default function ActionTakenMasterPage() {
     }
   };
 
-  // Open Edit Modal
   const handleOpenEdit = (item: IActionMappingItem) => {
     setEditingItem(item);
     resetEditForm({
@@ -178,7 +171,6 @@ export default function ActionTakenMasterPage() {
     onEditOpen();
   };
 
-  // Handle Edit Save
   const onUpdateRule: SubmitHandler<ActionMappingFormValues> = async (values) => {
     if (!editingItem) return;
     try {
@@ -203,13 +195,11 @@ export default function ActionTakenMasterPage() {
     }
   };
 
-  // Open Delete Modal
   const handleOpenDelete = (item: IActionMappingItem) => {
     setItemToDelete(item);
     onDeleteOpen();
   };
 
-  // Confirm Delete
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
     try {
@@ -225,7 +215,6 @@ export default function ActionTakenMasterPage() {
     }
   };
 
-  // Filtered List
   const filteredActions = useMemo(() => {
     return actionsList.filter((item) => {
       const matchesSearch =
@@ -243,7 +232,6 @@ export default function ActionTakenMasterPage() {
     });
   }, [actionsList, searchQuery, selectedDeadlineFilter]);
 
-  // Pagination calculations
   const totalPages = Math.ceil(filteredActions.length / rowsPerPage) || 1;
   const paginatedItems = useMemo(() => {
     const start = (page - 1) * rowsPerPage;

@@ -33,12 +33,10 @@ export default function DynamicRBACPage() {
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isCreatingRole, setIsCreatingRole] = useState<boolean>(false);
 
-  // New Role Form State
   const [newRoleName, setNewRoleName] = useState("");
   const [newRoleCode, setNewRoleCode] = useState("");
   const [newRoleDesc, setNewRoleDesc] = useState("");
 
-  // 1. Load All Roles from Backend
   const loadRoles = useCallback(async () => {
     setLoadingRoles(true);
     try {
@@ -61,7 +59,6 @@ export default function DynamicRBACPage() {
     loadRoles();
   }, [loadRoles]);
 
-  // 2. Load Permissions Matrix for Selected Role
   const loadMatrix = useCallback(async (roleId: string) => {
     if (!roleId) return;
     setLoadingMatrix(true);
@@ -84,12 +81,10 @@ export default function DynamicRBACPage() {
     }
   }, [selectedRoleId, loadMatrix]);
 
-  // Active Role Item
   const activeRole = useMemo(() => {
     return roles.find((r) => r._id === selectedRoleId);
   }, [roles, selectedRoleId]);
 
-  // Toggle Action Capability
   const handleToggleAction = (
     index: number,
     actionKey: "canView" | "canCreate" | "canEdit" | "canDelete" | "canSign" | "canExport" | "canDownload"
@@ -104,7 +99,6 @@ export default function DynamicRBACPage() {
     });
   };
 
-  // Toggle All Actions for a row
   const handleToggleRowAll = (index: number) => {
     setPermissionsMatrix((prev) => {
       const updated = [...prev];
@@ -124,7 +118,6 @@ export default function DynamicRBACPage() {
     });
   };
 
-  // 3. Save Permissions to Backend
   const handleSavePermissions = async () => {
     if (!selectedRoleId) return;
     setIsSaving(true);
@@ -153,7 +146,6 @@ export default function DynamicRBACPage() {
     }
   };
 
-  // 4. Create New Role
   const handleCreateRole = async (onClose: () => void) => {
     if (!newRoleName.trim() || !newRoleCode.trim()) {
       toast.error("Role Name and Code are mandatory.");

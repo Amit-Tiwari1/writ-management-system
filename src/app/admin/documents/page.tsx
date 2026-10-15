@@ -57,12 +57,10 @@ function DocumentDMSContent() {
   const { isOpen: isFullScreenOpen, onOpen: onFullScreenOpen, onOpenChange: onFullScreenOpenChange } = useDisclosure();
   const { isOpen: isAnnotateOpen, onOpen: onAnnotateOpen, onOpenChange: onAnnotateOpenChange } = useDisclosure();
 
-  // State: Case Selection
   const [casesList, setCasesList] = useState<CaseItem[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string>("");
   const [loadingCases, setLoadingCases] = useState<boolean>(true);
 
-  // State: 5-Tier Folders
   const [activeFolder, setActiveFolder] = useState<FolderCategoryKey>("01_petitions");
   const [foldersData, setFoldersData] = useState<Record<FolderCategoryKey, ICaseDocumentItem[]>>({
     "01_petitions": [],
@@ -74,20 +72,16 @@ function DocumentDMSContent() {
   const [loadingDocs, setLoadingDocs] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  // Preview Document
   const [previewDoc, setPreviewDoc] = useState<ICaseDocumentItem | null>(null);
 
-  // Upload Modal State
   const [uploadFolder, setUploadFolder] = useState<FolderCategoryKey>("01_petitions");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
 
-  // Annotation Modal State
   const [annotationNote, setAnnotationNote] = useState<string>("");
   const [annotationPage, setAnnotationPage] = useState<number>(1);
   const [isAnnotating, setIsAnnotating] = useState<boolean>(false);
 
-  // 1. Load Live Cases from Backend
   useEffect(() => {
     async function loadCases() {
       setLoadingCases(true);
@@ -112,7 +106,6 @@ function DocumentDMSContent() {
     loadCases();
   }, [queryCaseId]);
 
-  // 2. Fetch Live Documents when Selected Case changes
   const fetchCaseDocuments = useCallback(async (caseId: string) => {
     if (!caseId) return;
     setLoadingDocs(true);
@@ -138,7 +131,6 @@ function DocumentDMSContent() {
     }
   }, [selectedCaseId, fetchCaseDocuments]);
 
-  // Current Selected Case Metadata
   const activeCase = useMemo(() => {
     return casesList.find((c) => c._id === selectedCaseId);
   }, [casesList, selectedCaseId]);
@@ -150,7 +142,6 @@ function DocumentDMSContent() {
     }));
   }, [casesList]);
 
-  // Current Folder Files filtered by Search
   const currentFiles = useMemo(() => {
     const list = foldersData[activeFolder] || [];
     if (!searchQuery.trim()) return list;
@@ -163,7 +154,6 @@ function DocumentDMSContent() {
     );
   }, [foldersData, activeFolder, searchQuery]);
 
-  // 3. Handle File Upload
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setSelectedFile(e.target.files[0]);
@@ -201,7 +191,6 @@ function DocumentDMSContent() {
     }
   };
 
-  // 4. Handle Save Marginal Annotation
   const handleSaveAnnotation = async () => {
     if (!annotationNote.trim() || !previewDoc) return;
     setIsAnnotating(true);
@@ -223,7 +212,6 @@ function DocumentDMSContent() {
     }
   };
 
-  // Format Helper for file size
   const formatFileSize = (bytes: number) => {
     if (!bytes) return "0 B";
     const k = 1024;
@@ -232,7 +220,6 @@ function DocumentDMSContent() {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
   };
 
-  // Safe PDF URL resolver
   const getPdfUrl = (url?: string) => {
     if (!url) return "";
     return url;
@@ -609,12 +596,10 @@ function DocumentDMSContent() {
         </ModalContent>
       </Modal>
 
-      {/* 2. Full Screen Document Viewer Modal (FIXED EMBED) */}
       <Modal isOpen={isFullScreenOpen} onOpenChange={onFullScreenOpenChange} placement="center" size="5xl">
         <ModalContent className="max-h-[92vh]">
           {(onClose) => {
             const pdfSrc = previewDoc?.s3Bucket || "";
-            // Google Docs Viewer acts as universal proxy for PDFs on cloud storages
             const viewerUrl = `https://docs.google.com/gview?url=${encodeURIComponent(pdfSrc)}&embedded=true`;
 
             return (

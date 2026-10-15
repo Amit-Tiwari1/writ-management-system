@@ -40,7 +40,6 @@ export default function AuditLogsPage() {
   const { isOpen, onOpen, onOpenChange } = useDisclosure();
   const [selectedLog, setSelectedLog] = useState<AuditLogItem | null>(null);
 
-  // Data & Pagination State
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [totalPages, setTotalPages] = useState<number>(1);
@@ -48,12 +47,10 @@ export default function AuditLogsPage() {
   const [limit] = useState<number>(10);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Filters State
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [tempSearch, setTempSearch] = useState<string>("");
   const [severityFilter, setSeverityFilter] = useState<string>("ALL");
 
-  // Fetch Audit Logs from Real Backend
   const loadAuditLogs = useCallback(async () => {
     setLoading(true);
     try {

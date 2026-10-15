@@ -77,7 +77,6 @@ export default function OrganizationMasterPage() {
   const [editingDept, setEditingDept] = useState<DepartmentRecord | null>(null);
   const [deptToDelete, setDeptToDelete] = useState<DepartmentRecord | null>(null);
 
-  // React Hook Form for Add
   const {
     control: addControl,
     handleSubmit: handleAddSubmit,
@@ -93,7 +92,6 @@ export default function OrganizationMasterPage() {
     },
   });
 
-  // React Hook Form for Edit
   const {
     control: editControl,
     handleSubmit: handleEditSubmit,
@@ -109,7 +107,6 @@ export default function OrganizationMasterPage() {
     },
   });
 
-  // Fetch Departments from Real Backend API
   const fetchDepartments = useCallback(async () => {
     setLoading(true);
     try {
@@ -129,7 +126,6 @@ export default function OrganizationMasterPage() {
     fetchDepartments();
   }, [fetchDepartments]);
 
-  // Open Add Modal
   const handleOpenAdd = () => {
     resetAddForm({
       unitName: "",
@@ -140,7 +136,6 @@ export default function OrganizationMasterPage() {
     onAddOpen();
   };
 
-  // Submit Add to Backend
   const onAddDepartment: SubmitHandler<DepartmentFormValues> = async (values) => {
     setIsSubmitting(true);
     try {
@@ -164,7 +159,6 @@ export default function OrganizationMasterPage() {
     }
   };
 
-  // Open Edit Modal
   const handleOpenEdit = (item: DepartmentRecord) => {
     setEditingDept(item);
     resetEditForm({
@@ -176,7 +170,6 @@ export default function OrganizationMasterPage() {
     onEditOpen();
   };
 
-  // Save Edit
   const onSaveEdit: SubmitHandler<DepartmentFormValues> = async (values) => {
     if (!editingDept) return;
     try {
@@ -198,13 +191,11 @@ export default function OrganizationMasterPage() {
     }
   };
 
-  // Open Delete Prompt
   const handleOpenDelete = (item: DepartmentRecord) => {
     setDeptToDelete(item);
     onDeleteOpen();
   };
 
-  // Confirm Delete
   const handleConfirmDelete = async () => {
     if (!deptToDelete) return;
     setDepartments((prev) => prev.filter((d) => d._id !== deptToDelete._id));

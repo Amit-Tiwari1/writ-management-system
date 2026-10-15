@@ -33,93 +33,44 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import axiosClient from "@/api/axiosClient";
-
-interface ConnectedWritItem {
-  writNumber: string;
-  cnrNumber?: string;
-  petitionerName?: string;
-  taggedDate?: string;
-}
-
-interface CaseItem {
-  _id: string;
-  fileNo: string;
-  noticeNumber?: string;
-  writNumber?: string;
-  cnrNumber?: string;
-  identifierTier: 1 | 2 | 3 | 4;
-  court: string;
-  courtCode: string;
-  caseType: string;
-  benchLocation: string;
-  courtRoomNo?: string;
-  coramBench?: string;
-  leadPetitioner: string;
-  respondentString: string;
-  assignedOIC: string;
-  assignedPairokar: string;
-  sectionWing: string;
-  category: string;
-  subCategory?: string;
-  disputeSubject: string;
-  stage: string;
-  judicialStatus: string;
-  internalHold?: {
-    location: string;
-    holdDays: number;
-  };
-  ndoh: string | null;
-  hasActiveStay: boolean;
-  isContemptNotice: boolean;
-  connectedWrits: ConnectedWritItem[];
-  coPetitionersCount: number;
-  syncStatus: "LIVE_SYNCED" | "SCHEDULED" | "MANUAL_DOCKET" | "DISCREPANCY";
-  createdAt: string;
-}
-
-interface PillsMetrics {
-  all: number;
-  withConnected: number;
-  advanceNotice: number;
-  stayInForce: number;
-  contemptAlerts: number;
-}
+import { MastersAPI } from "@/api/mastersApi";
+import { CaseItem, PillsMetrics } from "@/types/case.types";
+import ExportButton from "../components/ExportButton";
 
 export default function CaseRegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const currentSearch = searchParams.get("search") || "";
+  const currentCourt = searchParams.get("court") || "ALL";
+  const currentWing = searchParams.get("wing") || "ALL";
+  const currentStatusFilter = searchParams.get("statusFilter") || "all";
+  const currentPage = parseInt(searchParams.get("page") || "1", 10);
   const hearingDateParam = searchParams.get("hearingDate");
 
-  // Sync Modal & Tagged Writs Modal Disclosures
   const { isOpen: isSyncOpen, onOpen: onSyncOpen, onOpenChange: onSyncOpenChange } = useDisclosure();
   const { isOpen: isConnectedOpen, onOpen: onConnectedOpen, onOpenChange: onConnectedOpenChange } = useDisclosure();
 
-  // Data & Loading States
+  const [courtOptions, setCourtOptions] = useState<Array<{ key: string; label: string }>>([]);
+  const [wingOptions, setWingOptions] = useState<Array<{ key: string; label: string }>>([]);
+
+  const [searchInput, setSearchInput] = useState<string>(currentSearch);
+  const [tempCourt, setTempCourt] = useState<string>(currentCourt);
+  const [tempWing, setTempWing] = useState<string>(currentWing);
+
   const [cases, setCases] = useState<CaseItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isAttaching, setIsAttaching] = useState<boolean>(false);
-
-  // Filters & Pagination State
-  const [search, setSearch] = useState<string>("");
-  const [tempSearch, setTempSearch] = useState<string>("");
-  const [selectedCourt, setSelectedCourt] = useState<string>("ALL");
-  const [selectedWing, setSelectedWing] = useState<string>("ALL");
-  const [activePill, setActivePill] = useState<string>("all");
-  const [page, setPage] = useState<number>(1);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [totalCount, setTotalCount] = useState<number>(0);
   const rowsPerPage = 10;
 
-  // Active Modals Item References
   const [activeSyncCase, setActiveSyncCase] = useState<CaseItem | null>(null);
   const [selectedLeadCase, setSelectedLeadCase] = useState<CaseItem | null>(null);
-
-  // New Tagged Writ Form State
   const [newTaggedWritNo, setNewTaggedWritNo] = useState<string>("");
   const [newTaggedPetitioner, setNewTaggedPetitioner] = useState<string>("");
 
-  // Metrics Pills Counters
   const [metrics, setMetrics] = useState<PillsMetrics>({
     all: 0,
     withConnected: 0,
@@ -128,25 +79,86 @@ export default function CaseRegisterPage() {
     contemptAlerts: 0,
   });
 
-  // Fetch Cases Function from Real Backend API
+  useEffect(() => {
+    async function loadMasters() {
+      try {
+        const res = await MastersAPI.getIntakeDropdowns();
+        if (res?.success) {
+          if (res.data.courts) {
+            setCourtOptions([
+              { key: "ALL", label: "All Courts" },
+              ...res.data.courts.map((c: any) => ({
+                key: c.shortCode || c.courtName,
+                label: `${c.courtName} (${c.shortCode})`,
+              })),
+            ]);
+          }
+          if (res.data.departments) {
+            setWingOptions([
+              { key: "ALL", label: "All Wings" },
+              ...res.data.departments.map((d: any) => ({
+                key: d.unitName,
+                label: d.unitName,
+              })),
+            ]);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load dropdowns:", err);
+      }
+    }
+    loadMasters();
+  }, []);
+
+  const buildAndPushUrl = useCallback(
+    (overrides: Record<string, any> = {}) => {
+      const merged = {
+        search: currentSearch,
+        court: currentCourt,
+        wing: currentWing,
+        statusFilter: currentStatusFilter,
+        page: currentPage,
+        ...overrides,
+      };
+
+      const params = new URLSearchParams();
+      if (merged.search && merged.search.trim().length >= 3) {
+        params.set("search", merged.search.trim());
+      }
+      if (merged.court && merged.court !== "ALL") {
+        params.set("court", merged.court);
+      }
+      if (merged.wing && merged.wing !== "ALL") {
+        params.set("wing", merged.wing);
+      }
+      if (merged.statusFilter && merged.statusFilter !== "all") {
+        params.set("statusFilter", merged.statusFilter);
+      }
+      if (merged.page && merged.page > 1) {
+        params.set("page", String(merged.page));
+      }
+      if (hearingDateParam) {
+        params.set("hearingDate", hearingDateParam);
+      }
+
+      router.replace(`/admin/cases?${params.toString()}`, { scroll: false });
+    },
+    [currentSearch, currentCourt, currentWing, currentStatusFilter, currentPage, hearingDateParam, router]
+  );
+
   const fetchCases = useCallback(async () => {
     setLoading(true);
     try {
-      let statusFilter: string | undefined = undefined;
-      if (activePill === "with_connected") statusFilter = "with_connected";
-      else if (activePill === "advance_notice") statusFilter = "advance_notice";
-      else if (activePill === "stay") statusFilter = "stay";
-      else if (activePill === "contempt") statusFilter = "contempt";
-
       const params: Record<string, any> = {
-        page,
+        page: currentPage,
         limit: rowsPerPage,
       };
 
-      if (search.trim()) params.search = search.trim();
-      if (selectedCourt !== "ALL") params.court = selectedCourt;
-      if (selectedWing !== "ALL") params.wing = selectedWing;
-      if (statusFilter) params.statusFilter = statusFilter;
+      if (currentSearch.trim().length >= 3) params.search = currentSearch.trim();
+      if (currentCourt !== "ALL") params.court = currentCourt;
+      if (currentWing !== "ALL") params.wing = currentWing;
+      if (currentStatusFilter !== "all") params.statusFilter = currentStatusFilter;
+      if (hearingDateParam) params.hearingDate = hearingDateParam;
 
       const response = await axiosClient.get("/cases", { params });
 
@@ -160,32 +172,55 @@ export default function CaseRegisterPage() {
       }
     } catch (err: any) {
       console.error("[CaseRegister] Error loading cases:", err);
-      toast.error(err.response?.data?.message || "Failed to load litigation register");
+      toast.error(err.response?.data?.message || "Failed to load register");
     } finally {
       setLoading(false);
     }
-  }, [page, search, selectedCourt, selectedWing, activePill]);
+  }, [currentPage, currentSearch, currentCourt, currentWing, currentStatusFilter, hearingDateParam]);
 
   useEffect(() => {
     fetchCases();
   }, [fetchCases]);
 
+  useEffect(() => {
+    setSearchInput(currentSearch);
+    setTempCourt(currentCourt);
+    setTempWing(currentWing);
+  }, [currentSearch, currentCourt, currentWing]);
+
+  const handleSearchChange = (val: string) => {
+    setSearchInput(val);
+    const clean = val.trim();
+    if (clean.length >= 3) {
+      buildAndPushUrl({ search: clean, page: 1 });
+    } else if (clean.length === 0 && currentSearch !== "") {
+      buildAndPushUrl({ search: "", page: 1 });
+    }
+  };
+
   const handleApplyFilters = () => {
-    setSearch(tempSearch);
-    setPage(1);
+    buildAndPushUrl({
+      search: searchInput.trim().length >= 3 ? searchInput.trim() : "",
+      court: tempCourt,
+      wing: tempWing,
+      page: 1,
+    });
   };
 
   const handleResetFilters = () => {
-    setSearch("");
-    setTempSearch("");
-    setSelectedCourt("ALL");
-    setSelectedWing("ALL");
-    setActivePill("all");
-    setPage(1);
-    router.push("/admin/cases");
+    setSearchInput("");
+    setTempCourt("ALL");
+    setTempWing("ALL");
+    router.replace("/admin/cases");
   };
 
-  // Trigger eCourts CIS Background Polling via Backend
+  const handleStatusPillClick = (statusKey: string) => {
+    buildAndPushUrl({
+      statusFilter: statusKey,
+      page: 1,
+    });
+  };
+
   const handleExecuteSync = async () => {
     if (!activeSyncCase) return;
     setIsSyncing(true);
@@ -205,13 +240,11 @@ export default function CaseRegisterPage() {
     }
   };
 
-  // Open Connected Writs Management Modal
   const openConnectedModal = (leadCase: CaseItem) => {
     setSelectedLeadCase(leadCase);
     onConnectedOpen();
   };
 
-  // Attach a new connected writ into the lead docket in Backend
   const handleAttachWrit = async () => {
     if (!newTaggedWritNo || !selectedLeadCase) return;
     setIsAttaching(true);
@@ -242,7 +275,6 @@ export default function CaseRegisterPage() {
     }
   };
 
-  // Columns Configuration
   const columns = [
     { name: "SYNC", uid: "syncBadge" },
     { name: "FILE DOCKET NO.", uid: "fileDocketNo" },
@@ -473,7 +505,6 @@ export default function CaseRegisterPage() {
 
   return (
     <div className="space-y-4">
-      {/* Top Header Card */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -486,16 +517,19 @@ export default function CaseRegisterPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="bordered"
-                radius="sm"
-                className="border-slate-200 bg-white text-xs font-semibold text-slate-700"
-                startContent={<span className="material-symbols-rounded text-sm">download</span>}
-                onClick={() => toast.success("Preparing consolidated MIS Excel export...")}
-              >
-                Export XLS
-              </Button>
+              <ExportButton
+                endpoint="/cases/export"
+                filterParams={{
+                  search: currentSearch,
+                  court: currentCourt,
+                  wing: currentWing,
+                  statusFilter: currentStatusFilter,
+                }}
+                fileBaseName="UPPRPB_Case_Register"
+                allowExcel={true}
+                allowPdf={true}
+              />
+
               <Link href="/admin/cases/register">
                 <Button
                   size="sm"
@@ -509,7 +543,7 @@ export default function CaseRegisterPage() {
             </div>
           </div>
 
-          {/* Active Filter Chips & Metrics Banner */}
+          {/* 5 Status Metrics Pills */}
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
             {hearingDateParam && (
               <Chip size="sm" color="primary" variant="flat" className="font-bold text-xs">
@@ -519,79 +553,64 @@ export default function CaseRegisterPage() {
 
             <Chip
               size="sm"
-              variant={activePill === "all" ? "solid" : "flat"}
+              variant={currentStatusFilter === "all" ? "solid" : "flat"}
               className={`cursor-pointer text-xs font-semibold ${
-                activePill === "all" ? "bg-[#0f2744] text-white" : "bg-slate-100 text-slate-700"
+                currentStatusFilter === "all" ? "bg-[#0f2744] text-white" : "bg-slate-100 text-slate-700"
               }`}
-              onClick={() => {
-                setActivePill("all");
-                setPage(1);
-              }}
+              onClick={() => handleStatusPillClick("all")}
             >
               All Dockets ({metrics.all})
             </Chip>
 
             <Chip
               size="sm"
-              variant={activePill === "with_connected" ? "solid" : "flat"}
+              variant={currentStatusFilter === "with_connected" ? "solid" : "flat"}
               color="primary"
               className="cursor-pointer text-xs font-semibold"
-              onClick={() => {
-                setActivePill("with_connected");
-                setPage(1);
-              }}
+              onClick={() => handleStatusPillClick("with_connected")}
             >
               🔗 With Connected Writs ({metrics.withConnected})
             </Chip>
 
             <Chip
               size="sm"
-              variant={activePill === "advance_notice" ? "solid" : "flat"}
+              variant={currentStatusFilter === "advance_notice" ? "solid" : "flat"}
               color="warning"
               className="cursor-pointer text-xs font-semibold"
-              onClick={() => {
-                setActivePill("advance_notice");
-                setPage(1);
-              }}
+              onClick={() => handleStatusPillClick("advance_notice")}
             >
               📄 Advance Notice Stage ({metrics.advanceNotice})
             </Chip>
 
             <Chip
               size="sm"
-              variant={activePill === "stay" ? "solid" : "flat"}
+              variant={currentStatusFilter === "stay" ? "solid" : "flat"}
               color="danger"
               className="cursor-pointer text-xs font-semibold"
-              onClick={() => {
-                setActivePill("stay");
-                setPage(1);
-              }}
+              onClick={() => handleStatusPillClick("stay")}
             >
               ⚠️ Stay in Force ({metrics.stayInForce})
             </Chip>
 
             <Chip
               size="sm"
-              variant={activePill === "contempt" ? "solid" : "flat"}
+              variant={currentStatusFilter === "contempt" ? "solid" : "flat"}
               color="danger"
               className="cursor-pointer text-xs font-semibold"
-              onClick={() => {
-                setActivePill("contempt");
-                setPage(1);
-              }}
+              onClick={() => handleStatusPillClick("contempt")}
             >
               🔴 Contempt Alerts ({metrics.contemptAlerts})
             </Chip>
           </div>
 
-          {/* Universal Search & Master Dropdown Filters */}
+          {/* Search (Strict 3+ Chars) & Controlled Dropdowns */}
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
             <Input
               size="sm"
               radius="sm"
-              placeholder="Search File No, Writ, Notice, CNR, Litigant..."
-              value={tempSearch}
-              onValueChange={setTempSearch}
+              placeholder="Search (min. 3 characters)..."
+              value={searchInput}
+              onValueChange={handleSearchChange}
               onKeyDown={(e) => e.key === "Enter" && handleApplyFilters()}
               startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
               className="bg-slate-50"
@@ -601,36 +620,24 @@ export default function CaseRegisterPage() {
               size="sm"
               radius="sm"
               placeholder="Select Court"
-              selectedKeys={[selectedCourt]}
-              onChange={(e) => {
-                setSelectedCourt(e.target.value);
-                setPage(1);
-              }}
+              items={courtOptions.length > 0 ? courtOptions : [{ key: "ALL", label: "All Courts" }]}
+              selectedKeys={[tempCourt]}
+              onChange={(e) => setTempCourt(e.target.value)}
               className="bg-slate-50"
             >
-              <SelectItem key="ALL">All Courts</SelectItem>
-              <SelectItem key="HC-ALD">High Court Allahabad</SelectItem>
-              <SelectItem key="HC-LKO">High Court Lucknow</SelectItem>
-              <SelectItem key="SCI">Supreme Court of India</SelectItem>
-              <SelectItem key="SPST">State Tribunal (SPST)</SelectItem>
+              {(c) => <SelectItem key={c.key}>{c.label}</SelectItem>}
             </Select>
 
             <Select
               size="sm"
               radius="sm"
               placeholder="Owning Wing / Section"
-              selectedKeys={[selectedWing]}
-              onChange={(e) => {
-                setSelectedWing(e.target.value);
-                setPage(1);
-              }}
+              items={wingOptions.length > 0 ? wingOptions : [{ key: "ALL", label: "All Wings" }]}
+              selectedKeys={[tempWing]}
+              onChange={(e) => setTempWing(e.target.value)}
               className="bg-slate-50"
             >
-              <SelectItem key="ALL">All Wings</SelectItem>
-              <SelectItem key="Recruitment Wing">Recruitment Wing</SelectItem>
-              <SelectItem key="Promotion Wing">Promotion Wing</SelectItem>
-              <SelectItem key="Legal Cell">Legal Cell</SelectItem>
-              <SelectItem key="Establishment Wing">Establishment Wing</SelectItem>
+              {(w) => <SelectItem key={w.key}>{w.label}</SelectItem>}
             </Select>
 
             <div className="flex gap-2">
@@ -661,20 +668,22 @@ export default function CaseRegisterPage() {
         <CardBody className="p-0">
           <Table
             removeWrapper
-            aria-label="4-Identifier and Connected Writs Register Table"
+            aria-label="Case Register Table"
             className="min-w-full"
             bottomContent={
               <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
                 <span className="text-xs text-slate-500">
-                  Showing Page <strong>{page}</strong> of <strong>{totalPages}</strong> (Total <strong>{totalCount}</strong> Records)
+                  Showing Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> (Total <strong>{totalCount}</strong> Records)
                 </span>
                 <Pagination
                   size="sm"
                   isCompact
                   showControls
                   total={totalPages}
-                  page={page}
-                  onChange={(newPage) => setPage(newPage)}
+                  page={currentPage}
+                  onChange={(newPage) => {
+                    buildAndPushUrl({ page: newPage });
+                  }}
                 />
               </div>
             }
@@ -712,13 +721,8 @@ export default function CaseRegisterPage() {
         </CardBody>
       </Card>
 
-      {/* MODAL 1: CONNECTED / TAGGED WRITS MANAGER */}
-      <Modal
-        isOpen={isConnectedOpen}
-        onOpenChange={onConnectedOpenChange}
-        size="2xl"
-        scrollBehavior="inside"
-      >
+      {/* Tagged Writs Modal */}
+      <Modal isOpen={isConnectedOpen} onOpenChange={onConnectedOpenChange} size="2xl" scrollBehavior="inside">
         <ModalContent>
           {(onClose) => (
             <>
@@ -771,7 +775,6 @@ export default function CaseRegisterPage() {
                   )}
                 </div>
 
-                {/* Attach New Writ Form */}
                 <div className="rounded-lg border border-dashed border-slate-300 p-3 space-y-2">
                   <p className="font-bold text-slate-800">Tag a New Writ to this Lead File:</p>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -817,7 +820,7 @@ export default function CaseRegisterPage() {
         </ModalContent>
       </Modal>
 
-      {/* MODAL 2: LIVE ECOURTS NAPIX SYNC MODAL */}
+      {/* Live eCourts Sync Modal */}
       <Modal isOpen={isSyncOpen} onOpenChange={onSyncOpenChange} placement="top" size="md">
         <ModalContent>
           {(onClose) => (

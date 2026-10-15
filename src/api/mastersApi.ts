@@ -30,13 +30,11 @@ export interface IntakeDropdownBundle {
 }
 
 export const MastersAPI = {
-  // Fast Intake Bundle for Case Register / Wizards
   getIntakeDropdowns: async (): Promise<{ success: boolean; data: IntakeDropdownBundle }> => {
     const res = await axiosClient.get("/masters/dropdowns");
     return res.data;
   },
 
-  // Geographic Hierarchy
   getStates: async () => (await axiosClient.get("/masters/states")).data,
   createState: async (payload: any) => (await axiosClient.post("/masters/states", payload)).data,
   updateState: async (id: string, payload: any) => (await axiosClient.put(`/masters/states/${id}`, payload)).data,
@@ -55,7 +53,6 @@ export const MastersAPI = {
   createDistrict: async (payload: any) => (await axiosClient.post("/masters/districts", payload)).data,
   deleteDistrict: async (id: string) => (await axiosClient.delete(`/masters/districts/${id}`)).data,
 
-  // Judicial Hierarchy
   getCourts: async () => (await axiosClient.get("/masters/courts")).data,
   createCourt: async (payload: any) => (await axiosClient.post("/masters/courts", payload)).data,
   deleteCourt: async (id: string) => (await axiosClient.delete(`/masters/courts/${id}`)).data,
@@ -65,7 +62,6 @@ export const MastersAPI = {
   createCaseType: async (payload: any) => (await axiosClient.post("/masters/case-types", payload)).data,
   deleteCaseType: async (id: string) => (await axiosClient.delete(`/masters/case-types/${id}`)).data,
 
-  // Board Taxonomy
   getCategories: async () => (await axiosClient.get("/masters/categories")).data,
   createCategory: async (payload: any) => (await axiosClient.post("/masters/categories", payload)).data,
 
@@ -80,7 +76,6 @@ export const MastersAPI = {
   getCustodians: async () => (await axiosClient.get("/masters/custodians")).data,
   createCustodian: async (payload: any) => (await axiosClient.post("/masters/custodians", payload)).data,
 
-  // Institutional Masters
   getDepartments: async () => (await axiosClient.get("/masters/departments")).data,
   createDepartment: async (payload: any) => (await axiosClient.post("/masters/departments", payload)).data,
 

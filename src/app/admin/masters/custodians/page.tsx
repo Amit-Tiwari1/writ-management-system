@@ -84,7 +84,6 @@ export default function CustodianMappingPage() {
 
   const [itemToDelete, setItemToDelete] = useState<CustodianRecord | null>(null);
 
-  // Fetch Custodians and Categories from Backend
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -111,7 +110,6 @@ export default function CustodianMappingPage() {
     loadData();
   }, [loadData]);
 
-  // Fetch Subjects whenever Category is selected in Add Modal
   const handleCategoryChange = async (categoryId: string) => {
     setFormData((prev) => ({ ...prev, categoryId, subjectId: "" }));
     if (!categoryId) {
@@ -142,7 +140,6 @@ export default function CustodianMappingPage() {
     onAddOpen();
   };
 
-  // Submit Add Custodian Mapping
   const handleAdd = async () => {
     if (!formData.categoryId || !formData.subjectId || !formData.officerName.trim()) {
       toast.error("Please select Category, Subject, and enter Officer Name");
@@ -183,7 +180,6 @@ export default function CustodianMappingPage() {
     setItemToDelete(null);
   };
 
-  // Dynamic filter items for categories
   const categoryFilterItems = useMemo(() => {
     return [
       { key: "ALL", label: "All Categories" },

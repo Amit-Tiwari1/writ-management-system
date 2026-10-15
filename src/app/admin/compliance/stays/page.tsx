@@ -47,7 +47,6 @@ export default function ActiveStaysRosterPage() {
     "Recruitment examination process for Constable posts is halted. Administrative hardship and public interest demand immediate vacation of interim order under Article 226(3)."
   );
 
-  // 1. Fetch Real Active Stays from Backend
   const loadStays = useCallback(async () => {
     setLoading(true);
     try {
@@ -73,7 +72,6 @@ export default function ActiveStaysRosterPage() {
     onOpen();
   };
 
-  // 2. Submit Vacation Motion to Backend
   const handleConfirmVacationDraft = async (onClose: () => void) => {
     if (!selectedStay) return;
     setIsSubmitting(true);
@@ -100,7 +98,6 @@ export default function ActiveStaysRosterPage() {
 
   return (
     <div className="space-y-4">
-      {/* Header Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -134,7 +131,6 @@ export default function ActiveStaysRosterPage() {
             </div>
           </div>
 
-          {/* Quick Metrics */}
           <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
             <div className="rounded-lg border border-rose-200 bg-rose-50/50 p-3">
               <p className="text-[11px] font-semibold text-rose-700">Vacation Motions Due (&lt; 7 Days)</p>
@@ -156,7 +152,6 @@ export default function ActiveStaysRosterPage() {
         </CardBody>
       </Card>
 
-      {/* Main Table Grid */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
           <Table removeWrapper aria-label="Active stays table" className="min-w-full">
@@ -265,7 +260,6 @@ export default function ActiveStaysRosterPage() {
         </CardBody>
       </Card>
 
-      {/* Vacation of Stay Drafting Modal */}
       <Modal isOpen={isOpen} onOpenChange={onOpenChange} placement="top" size="2xl">
         <ModalContent>
           {(onClose) => (

@@ -53,18 +53,15 @@ function GreenSheetNotingsContent() {
   const { isOpen: isVerifyOpen, onOpen: onVerifyOpen, onOpenChange: onVerifyOpenChange } = useDisclosure();
   const { isOpen: isPrintPreviewOpen, onOpen: onPrintPreviewOpen, onOpenChange: onPrintPreviewOpenChange } = useDisclosure();
 
-  // State: Cases & Officers
   const [casesList, setCasesList] = useState<CaseItem[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string>("");
   const [officersList, setOfficersList] = useState<ForwardableOfficer[]>([]);
   const [loadingCases, setLoadingCases] = useState<boolean>(true);
 
-  // State: Minutes Ledger
   const [notings, setNotings] = useState<INotingMinuteItem[]>([]);
   const [loadingNotings, setLoadingNotings] = useState<boolean>(false);
   const [activeDraft, setActiveDraft] = useState<INotingMinuteItem | null>(null);
 
-  // State: Drafting Box
   const [notingPurpose, setNotingPurpose] = useState<string>("PWC / Legal Opinion");
   const [fontEncoding, setFontEncoding] = useState<"Unicode" | "Kruti Dev 14">("Unicode");
   const [destinationUserId, setDestinationUserId] = useState<string>("");
@@ -75,11 +72,9 @@ function GreenSheetNotingsContent() {
   const [isSavingDraft, setIsSavingDraft] = useState<boolean>(false);
   const [isSigning, setIsSigning] = useState<boolean>(false);
 
-  // Modal State
   const [activeSignData, setActiveSignData] = useState<any>(null);
   const [printMemoData, setPrintMemoData] = useState<any>(null);
 
-  // 1. Initial Load: Fetch Cases & Forwardable Officers from Backend
   useEffect(() => {
     async function initData() {
       setLoadingCases(true);
@@ -115,7 +110,6 @@ function GreenSheetNotingsContent() {
     initData();
   }, [queryCaseId]);
 
-  // 2. Fetch Notings Ledger when Selected Case changes
   const fetchCaseNotings = useCallback(async (caseId: string) => {
     if (!caseId) return;
     setLoadingNotings(true);
@@ -150,7 +144,6 @@ function GreenSheetNotingsContent() {
     }
   }, [selectedCaseId, fetchCaseNotings]);
 
-  // Active Case Detail
   const activeCase = useMemo(() => {
     return casesList.find((c) => c._id === selectedCaseId);
   }, [casesList, selectedCaseId]);
@@ -169,7 +162,6 @@ function GreenSheetNotingsContent() {
     }));
   }, [officersList]);
 
-  // 3. Save Draft Minute
   const handleSaveDraft = async () => {
     if (!notingText.trim()) {
       toast.error("Please enter noting text before saving draft.");
@@ -201,7 +193,6 @@ function GreenSheetNotingsContent() {
     }
   };
 
-  // 4. Digitally Sign and Forward File
   const handleSignAndForward = async () => {
     if (!notingText.trim()) {
       toast.error("Noting text cannot be empty.");
@@ -242,7 +233,6 @@ function GreenSheetNotingsContent() {
     }
   };
 
-  // 5. Open Verification Modal for Signature
   const openSignatureModal = async (minute: INotingMinuteItem) => {
     try {
       const res = await NotingsAPI.verifySignature(selectedCaseId, minute.minuteNumber);
@@ -256,7 +246,6 @@ function GreenSheetNotingsContent() {
     }
   };
 
-  // 6. Open Official Print Preview
   const handleOpenPrintPreview = async () => {
     if (!selectedCaseId) return;
     try {

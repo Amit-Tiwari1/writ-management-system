@@ -82,7 +82,6 @@ function BatchCoPetitionersContent() {
   const [page, setPage] = useState(1);
   const rowsPerPage = 6;
 
-  // Form State: Add Single Petitioner
   const [formData, setFormData] = useState({
     rollNo: "",
     registrationNo: "",
@@ -96,7 +95,6 @@ function BatchCoPetitionersContent() {
 
   const [editingItem, setEditingItem] = useState<PetitionerRecord | null>(null);
 
-  // 1. Load Initial Cases and District Master
   useEffect(() => {
     async function loadInitialData() {
       try {
@@ -145,7 +143,6 @@ function BatchCoPetitionersContent() {
     loadInitialData();
   }, [queryCaseId]);
 
-  // 2. Fetch Petitioners whenever selectedCaseId changes
   const fetchPetitionersForCase = useCallback(async (caseId: string) => {
     if (!caseId) return;
     setLoadingPetitioners(true);
@@ -168,7 +165,6 @@ function BatchCoPetitionersContent() {
     }
   }, [selectedCaseId, fetchPetitionersForCase]);
 
-  // Handle District Auto-Zone Mapping
   const handleDistrictChange = (districtName: string) => {
     const found = districts.find((d) => d.key === districtName);
     setFormData((prev) => ({
@@ -179,7 +175,6 @@ function BatchCoPetitionersContent() {
     }));
   };
 
-  // 3. Add Individual Petitioner
   const handleAddPetitioner = async () => {
     if (!formData.rollNo.trim() || !formData.name.trim()) {
       toast.error("Roll Number and Petitioner Name are required!");
@@ -227,7 +222,6 @@ function BatchCoPetitionersContent() {
     }
   };
 
-  // 4. Update Petitioner Status / Details
   const openEditModal = (item: PetitionerRecord) => {
     setEditingItem({ ...item });
     onEditOpen();
@@ -247,7 +241,6 @@ function BatchCoPetitionersContent() {
     }
   };
 
-  // Case Select Dropdown Options
   const caseSelectItems = useMemo(() => {
     return casesList.map((c) => ({
       key: c._id,
@@ -255,12 +248,10 @@ function BatchCoPetitionersContent() {
     }));
   }, [casesList]);
 
-  // Current Selected Case Detail
   const currentCase = useMemo(() => {
     return casesList.find((c) => c._id === selectedCaseId);
   }, [casesList, selectedCaseId]);
 
-  // Filtered Petitioners List
   const filteredPetitioners = useMemo(() => {
     if (!searchQuery.trim()) return petitioners;
     const q = searchQuery.toLowerCase().trim();
@@ -272,7 +263,6 @@ function BatchCoPetitionersContent() {
     );
   }, [petitioners, searchQuery]);
 
-  // Pagination Slice
   const totalPages = Math.ceil(filteredPetitioners.length / rowsPerPage) || 1;
   const paginatedPetitioners = useMemo(() => {
     const start = (page - 1) * rowsPerPage;

@@ -21,6 +21,8 @@ import {
   ModalBody,
   ModalFooter,
   Input,
+  Select,
+  SelectItem,
   useDisclosure,
   Skeleton,
 } from "@nextui-org/react";
@@ -30,21 +32,51 @@ import toast from "react-hot-toast";
 import axiosClient from "@/api/axiosClient";
 import { CasesAPI } from "@/api/casesApi";
 
+interface MovementRecord {
+  _id: string;
+  fromOfficerName: string;
+  fromDesignation: string;
+  toOfficerName: string;
+  toDesignation: string;
+  actionType: string;
+  notingPurpose: string;
+  remarks: string;
+  receivedAt: string;
+  dispatchedAt: string;
+  holdDurationDays: number;
+  holdDurationHours: number;
+  minuteNumber?: number;
+}
+
 export default function CaseDossier360Page() {
   const params = useParams();
   const router = useRouter();
   const caseId = params?.caseId as string;
-  const { isOpen: isAttachOpen, onOpen: onAttachOpen, onOpenChange: onAttachOpenChange } = useDisclosure();
 
+  // Modals
+  const { isOpen: isAttachOpen, onOpen: onAttachOpen, onOpenChange: onAttachOpenChange } = useDisclosure();
+  const { isOpen: isStatusOpen, onOpen: onStatusOpen, onOpenChange: onStatusOpenChange } = useDisclosure();
+
+  // Data States
   const [caseData, setCaseData] = useState<any>(null);
   const [petitioners, setPetitioners] = useState<any[]>([]);
+  const [movementHistory, setMovementHistory] = useState<MovementRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
   const [isAttaching, setIsAttaching] = useState<boolean>(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState<boolean>(false);
 
+  // Status Change Form State
+  const [newStage, setNewStage] = useState<string>("");
+  const [newJudicialStatus, setNewJudicialStatus] = useState<string>("");
+  const [statusRemarks, setStatusRemarks] = useState<string>("");
+
+  // Attach Writ Form State
   const [newWritNo, setNewWritNo] = useState("");
   const [newCnrNo, setNewCnrNo] = useState("");
   const [newPetitioner, setNewPetitioner] = useState("");
 
+  // 1. Fetch Case Dossier Master Data
   const fetchCaseDossier = useCallback(async () => {
     if (!caseId) return;
     setLoading(true);
@@ -53,6 +85,8 @@ export default function CaseDossier360Page() {
       if (res?.success) {
         setCaseData(res.case);
         setPetitioners(res.petitioners || []);
+        setNewStage(res.case.stage || "Advance Notice Stage");
+        setNewJudicialStatus(res.case.judicialStatus || "ACTIVE");
       }
     } catch (err: any) {
       console.error("Failed to load case dossier:", err);
@@ -62,11 +96,56 @@ export default function CaseDossier360Page() {
     }
   }, [caseId]);
 
+  // 2. Fetch File Movement & Hold History
+  const fetchMovementHistory = useCallback(async () => {
+    if (!caseId) return;
+    setLoadingHistory(true);
+    try {
+      const res = await axiosClient.get(`/cases/${caseId}/movement-history`);
+      if (res.data?.success) {
+        setMovementHistory(res.data.data || []);
+      }
+    } catch (err: any) {
+      console.error("Failed to load movement history:", err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [caseId]);
+
   useEffect(() => {
     fetchCaseDossier();
-  }, [fetchCaseDossier]);
+    fetchMovementHistory();
+  }, [fetchCaseDossier, fetchMovementHistory]);
 
-  // 2. Attach a connected writ to this live dossier in DB
+  // Handle Quick Status / Stage Mutation
+  const handleUpdateStatus = async () => {
+    if (!newStage.trim()) {
+      toast.error("Please select a valid procedural stage");
+      return;
+    }
+
+    setIsUpdatingStatus(true);
+    try {
+      const res = await axiosClient.patch(`/cases/${caseId}/status`, {
+        stage: newStage,
+        judicialStatus: newJudicialStatus,
+        remarks: statusRemarks,
+      });
+
+      if (res.data?.success) {
+        toast.success("Case procedural status updated successfully!");
+        onStatusOpenChange();
+        fetchCaseDossier();
+        fetchMovementHistory();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to update case stage");
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+
+  // Handle Tagging Connected Writ
   const handleAttachWrit = async () => {
     if (!newWritNo.trim()) {
       toast.error("Writ Number is required");
@@ -127,6 +206,7 @@ export default function CaseDossier360Page() {
 
   return (
     <div className="space-y-4">
+      {/* 360 Header Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -169,7 +249,17 @@ export default function CaseDossier360Page() {
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="bordered"
+                radius="sm"
+                className="border-slate-300 text-xs font-semibold text-slate-700 bg-white"
+                startContent={<span className="material-symbols-rounded text-sm text-blue-700">published_with_changes</span>}
+                onPress={onStatusOpen}
+              >
+                Change Stage
+              </Button>
               <Link href={`/admin/cases/batch?caseId=${caseData._id}`}>
                 <Button
                   size="sm"
@@ -217,18 +307,24 @@ export default function CaseDossier360Page() {
             </div>
 
             <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200/60">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Owning Wing</span>
-              <p className="text-xs font-bold text-[#0f2744] mt-0.5 truncate">{caseData.sectionWing}</p>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Current Custody (Hold)</span>
+              <p className="text-xs font-bold text-[#0f2744] mt-0.5 truncate flex items-center justify-between">
+                <span>{caseData.internalHold?.location || caseData.assignedOIC}</span>
+                <span className="font-mono text-[10px] text-rose-600 bg-rose-50 px-1 rounded border border-rose-200">
+                  {caseData.internalHold?.holdDays ?? 0}d
+                </span>
+              </p>
             </div>
 
             <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200/60">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Assigned OIC</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Accountable OIC</span>
               <p className="text-xs font-bold text-slate-800 mt-0.5 truncate">{caseData.assignedOIC}</p>
             </div>
           </div>
         </CardBody>
       </Card>
 
+      {/* Main Multi-Tab Dossier Deck */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <Tabs
@@ -236,6 +332,7 @@ export default function CaseDossier360Page() {
             variant="underlined"
             classNames={{ tabList: "gap-6", cursor: "bg-[#0f2744]", tab: "max-w-fit px-0 h-9 text-xs font-semibold" }}
           >
+            {/* Tab 1: Overview */}
             <Tab key="overview" title="Overview & Parties">
               <div className="mt-4 space-y-6 text-xs">
                 <div>
@@ -279,6 +376,111 @@ export default function CaseDossier360Page() {
               </div>
             </Tab>
 
+            {/* Tab 2: File Movement & Custody History (NEW AUDIT TRACKER) */}
+            <Tab
+              key="movement"
+              title={`File Movement & Custody History (${movementHistory.length})`}
+            >
+              <div className="mt-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                      Chronological File Movement &amp; Hold Duration Audit
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Tamper-evident track record of file transit between secretariat desks and holding duration.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="bordered"
+                    radius="sm"
+                    className="text-xs font-semibold"
+                    onClick={fetchMovementHistory}
+                    isLoading={loadingHistory}
+                    startContent={<span className="material-symbols-rounded text-sm">sync</span>}
+                  >
+                    Refresh Audit
+                  </Button>
+                </div>
+
+                {movementHistory.length > 0 ? (
+                  <div className="relative pl-6 space-y-6 before:absolute before:bottom-0 before:left-2 before:top-2 before:w-0.5 before:bg-slate-200">
+                    {movementHistory.map((m, idx) => (
+                      <div key={m._id || idx} className="relative text-xs">
+                        {/* Timeline Bullet */}
+                        <div className="absolute -left-6 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#0f2744] text-[9px] font-bold text-white shadow">
+                          {idx + 1}
+                        </div>
+
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5 shadow-2xs hover:bg-white transition-colors">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/60 pb-2 mb-2">
+                            <div className="flex items-center gap-2">
+                              <Chip
+                                size="sm"
+                                variant="flat"
+                                color={m.actionType === "INITIAL_INTAKE" ? "primary" : "secondary"}
+                                className="text-[10px] font-bold"
+                              >
+                                {m.actionType}
+                              </Chip>
+                              <span className="font-bold text-slate-900">{m.notingPurpose}</span>
+                              {m.minuteNumber && (
+                                <span className="font-mono text-[10px] text-slate-500">
+                                  (Minute #{m.minuteNumber})
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className="rounded bg-rose-50 border border-rose-200 px-1.5 py-0.5 font-mono text-[10px] font-bold text-rose-700">
+                                Hold: {m.holdDurationDays}d {m.holdDurationHours}h
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {new Date(m.dispatchedAt).toLocaleString("en-IN", {
+                                  day: "2-digit",
+                                  month: "short",
+                                  year: "numeric",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+                            <div>
+                              <span className="text-slate-400 font-medium">Dispatched By:</span>
+                              <p className="font-bold text-slate-800">
+                                {m.fromOfficerName} <span className="font-normal text-slate-500">({m.fromDesignation})</span>
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 font-medium">Recipient Desk:</span>
+                              <p className="font-bold text-emerald-800">
+                                {m.toOfficerName} <span className="font-normal text-slate-500">({m.toDesignation})</span>
+                              </p>
+                            </div>
+                          </div>
+
+                          {m.remarks && (
+                            <div className="mt-2 rounded bg-white p-2 border border-slate-200/80 text-slate-600 font-serif">
+                              <em>&quot;{m.remarks}&quot;</em>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400">
+                    No recorded file movements on this docket yet. Movements log automatically upon Green Sheet forward.
+                  </div>
+                )}
+              </div>
+            </Tab>
+
+            {/* Tab 3: Connected Bunch Writs */}
             <Tab
               key="connected"
               title={`Connected Bunch Writs (${connectedList.length})`}
@@ -336,6 +538,7 @@ export default function CaseDossier360Page() {
               </div>
             </Tab>
 
+            {/* Tab 4: Candidate Roster */}
             <Tab key="roster" title={`Candidate Roster (${petitioners.length})`}>
               <div className="mt-4">
                 <Table removeWrapper aria-label="Petitioners Roster Table" className="min-w-full">
@@ -374,6 +577,86 @@ export default function CaseDossier360Page() {
         </CardBody>
       </Card>
 
+      {/* MODAL 1: CHANGE PROCEDURAL STAGE / JUDICIAL STATUS */}
+      <Modal isOpen={isStatusOpen} onOpenChange={onStatusOpenChange} placement="top" size="md">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <span className="material-symbols-rounded text-blue-700">published_with_changes</span>
+                Update Procedural Court Stage: {caseData.fileNo}
+              </ModalHeader>
+              <ModalBody className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Court Stage / Milestone
+                  </label>
+                  <Select
+                    size="sm"
+                    radius="sm"
+                    selectedKeys={[newStage]}
+                    onChange={(e) => setNewStage(e.target.value)}
+                    className="bg-slate-50"
+                  >
+                    <SelectItem key="Advance Notice Stage">Advance Notice Stage</SelectItem>
+                    <SelectItem key="Para-Wise Comments (PWC) Awaited">Para-Wise Comments (PWC) Awaited</SelectItem>
+                    <SelectItem key="Counter Affidavit Granted 3 Weeks">Counter Affidavit Granted 3 Weeks</SelectItem>
+                    <SelectItem key="Counter Affidavit Filed in Court">Counter Affidavit Filed in Court</SelectItem>
+                    <SelectItem key="Rejoinder Affidavit Awaited">Rejoinder Affidavit Awaited</SelectItem>
+                    <SelectItem key="Interim Stay In Force">Interim Stay In Force</SelectItem>
+                    <SelectItem key="Listed for Final Arguments">Listed for Final Arguments</SelectItem>
+                    <SelectItem key="Disposed Off / Closed">Disposed Off / Closed</SelectItem>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    System Judicial Status Flag
+                  </label>
+                  <Select
+                    size="sm"
+                    radius="sm"
+                    selectedKeys={[newJudicialStatus]}
+                    onChange={(e) => setNewJudicialStatus(e.target.value)}
+                    className="bg-slate-50"
+                  >
+                    <SelectItem key="ACTIVE">ACTIVE (Normal Proceedings)</SelectItem>
+                    <SelectItem key="PENDING_PWC">PENDING_PWC (Drafting Required)</SelectItem>
+                    <SelectItem key="STAY_IN_FORCE">STAY_IN_FORCE (High Risk / Article 226(3))</SelectItem>
+                    <SelectItem key="CONTEMPT_NOTICE">CONTEMPT_NOTICE (Time-bound Warning)</SelectItem>
+                    <SelectItem key="DISPOSED">DISPOSED (Judicial Order Passed)</SelectItem>
+                  </Select>
+                </div>
+
+                <Input
+                  size="sm"
+                  label="Remarks / Transition Note"
+                  labelPlacement="outside"
+                  placeholder="e.g. Counter Affidavit vetted and handed to CSC"
+                  value={statusRemarks}
+                  onValueChange={setStatusRemarks}
+                />
+              </ModalBody>
+              <ModalFooter>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isUpdatingStatus}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  radius="sm"
+                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  isLoading={isUpdatingStatus}
+                  onClick={handleUpdateStatus}
+                >
+                  Commit Status
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* MODAL 2: TAG CONNECTED WRIT */}
       <Modal isOpen={isAttachOpen} onOpenChange={onAttachOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
