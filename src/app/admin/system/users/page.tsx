@@ -21,12 +21,25 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
-  Skeleton,
+  Pagination,
+  Spinner,
 } from "@nextui-org/react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 
-import { AdminAPI, StaffUserItem, UserDropdownBundle } from "@/api/userApi";
+import { AdminAPI } from "@/api/userApi";
+import { StaffUserItem, UserDropdownBundle } from "@/types/user.types";
+
+interface SelectOption {
+  key: string;
+  label: string;
+}
+
+const COURT_BENCH_OPTIONS: SelectOption[] = [
+  { key: "BOTH", label: "Both Benches (All UP Jurisdiction)" },
+  { key: "ALLAHABAD", label: "High Court Allahabad (Principal Bench)" },
+  { key: "LUCKNOW", label: "High Court Lucknow Bench" },
+];
 
 export default function UsersMasterPage() {
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
@@ -42,6 +55,9 @@ export default function UsersMasterPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRoleFilter, setSelectedRoleFilter] = useState("ALL");
+
+  const [page, setPage] = useState(1);
+  const rowsPerPage = 10;
 
   const [formData, setFormData] = useState({
     name: "",
@@ -64,7 +80,7 @@ export default function UsersMasterPage() {
     try {
       const [dropdownRes, usersRes] = await Promise.all([
         AdminAPI.getUserFormDropdowns(),
-        AdminAPI.getUsersList(),
+        AdminAPI.getUsersList({ limit: 200 }),
       ]);
 
       if (dropdownRes?.success && dropdownRes.data) {
@@ -96,7 +112,7 @@ export default function UsersMasterPage() {
     loadInitialData();
   }, [loadInitialData]);
 
-  const designationItems = useMemo(() => {
+  const designationItems: SelectOption[] = useMemo(() => {
     if (!dropdowns?.designations) return [];
     return dropdowns.designations.map((d) => ({
       key: d.title,
@@ -104,7 +120,7 @@ export default function UsersMasterPage() {
     }));
   }, [dropdowns]);
 
-  const departmentItems = useMemo(() => {
+  const departmentItems: SelectOption[] = useMemo(() => {
     if (!dropdowns?.departments) return [];
     return dropdowns.departments.map((dep) => ({
       key: dep.unitName,
@@ -112,16 +128,15 @@ export default function UsersMasterPage() {
     }));
   }, [dropdowns]);
 
-  const roleItems = useMemo(() => {
+  const roleItems: SelectOption[] = useMemo(() => {
     if (!dropdowns?.roles) return [];
     return dropdowns.roles.map((r) => ({
       key: r._id,
       label: `${r.roleName} (${r.roleCode})`,
-      name: r.roleName,
     }));
   }, [dropdowns]);
 
-  const rankItems = useMemo(() => {
+  const rankItems: SelectOption[] = useMemo(() => {
     if (!dropdowns?.ranks || dropdowns.ranks.length === 0) {
       return [
         { key: "DG", label: "Director General (DG)" },
@@ -141,8 +156,8 @@ export default function UsersMasterPage() {
     }));
   }, [dropdowns]);
 
-  const roleFilterItems = useMemo(() => {
-    const list = [{ key: "ALL", label: "All Roles" }];
+  const roleFilterItems: SelectOption[] = useMemo(() => {
+    const list: SelectOption[] = [{ key: "ALL", label: "All Roles" }];
     if (dropdowns?.roles) {
       dropdowns.roles.forEach((r) => {
         list.push({ key: r.roleName, label: r.roleName });
@@ -184,7 +199,7 @@ export default function UsersMasterPage() {
           name: "",
           username: "",
           password: "",
-          rank: "DySP",
+          rank: dropdowns?.ranks[0]?.rankName || "DySP",
           designation: dropdowns?.designations[0]?.title || "",
           section: dropdowns?.departments[0]?.unitName || "",
           mobile: "",
@@ -213,6 +228,7 @@ export default function UsersMasterPage() {
       email: user.contactAndEmail.email,
       roleId: user.roleId || matchedRole?._id || "",
       rank: user.rank || "DySP",
+      courtBench: "BOTH",
       password: "",
     });
     onEditOpen();
@@ -231,6 +247,7 @@ export default function UsersMasterPage() {
         mobile: editingUser.mobile.trim(),
         email: editingUser.email.trim(),
         roleId: editingUser.roleId,
+        courtBench: editingUser.courtBench,
       };
       if (editingUser.password && editingUser.password.trim()) {
         payload.password = editingUser.password.trim();
@@ -280,7 +297,8 @@ export default function UsersMasterPage() {
         u.designationAndWing?.designation?.toLowerCase().includes(q) ||
         u.userIdLogin?.toLowerCase().includes(q) ||
         u.designationAndWing?.wing?.toLowerCase().includes(q) ||
-        u.contactAndEmail?.contact?.includes(q);
+        u.contactAndEmail?.contact?.includes(q) ||
+        u.contactAndEmail?.email?.toLowerCase().includes(q);
 
       const matchesRole =
         selectedRoleFilter === "ALL" || u.assignedRole === selectedRoleFilter;
@@ -289,19 +307,28 @@ export default function UsersMasterPage() {
     });
   }, [users, searchQuery, selectedRoleFilter]);
 
+  const totalPages = Math.ceil(filteredUsers.length / rowsPerPage) || 1;
+  const paginatedUsers = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    return filteredUsers.slice(start, start + rowsPerPage);
+  }, [filteredUsers, page, rowsPerPage]);
+
   return (
     <div className="space-y-4">
+      {/* 1. Header Information Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <Link href="/admin/cases">
+                <Link href="/admin/masters">
                   <Button isIconOnly size="sm" variant="light" className="text-slate-500">
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
                 </Link>
-                <h1 className="text-base font-bold text-slate-900">7.1 Officers &amp; User Credentials Directory</h1>
+                <h1 className="text-base font-bold text-slate-900">
+                  8.1 Officers &amp; User Credentials Directory
+                </h1>
                 <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
                   {activeStaffCount} Active Staff Members
                 </Chip>
@@ -327,28 +354,58 @@ export default function UsersMasterPage() {
               radius="sm"
               placeholder="Search officer name, designation, login or mobile..."
               value={searchQuery}
-              onValueChange={setSearchQuery}
+              onValueChange={(val) => {
+                setSearchQuery(val);
+                setPage(1);
+              }}
               startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
               className="bg-slate-50 sm:col-span-2"
             />
             <Select
               size="sm"
               radius="sm"
+              aria-label="Filter by Assigned Role"
               placeholder="Filter by Assigned Role"
               items={roleFilterItems}
               selectedKeys={[selectedRoleFilter]}
-              onChange={(e) => setSelectedRoleFilter(e.target.value || "ALL")}
+              onChange={(e) => {
+                setSelectedRoleFilter(e.target.value || "ALL");
+                setPage(1);
+              }}
               className="bg-slate-50 font-semibold"
             >
-              {(rf) => <SelectItem key={rf.key}>{rf.label}</SelectItem>}
+              {(rf: SelectOption) => <SelectItem key={rf.key}>{rf.label}</SelectItem>}
             </Select>
           </div>
         </CardBody>
       </Card>
 
+      {/* 2. Main Table View with Pagination */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
-          <Table removeWrapper aria-label="Officers Table" className="min-w-full">
+          <Table
+            removeWrapper
+            aria-label="Officers Table"
+            className="min-w-full"
+            bottomContent={
+              totalPages > 1 ? (
+                <div className="flex w-full justify-between items-center p-3 border-t border-slate-100">
+                  <span className="text-xs text-slate-500">
+                    Showing {(page - 1) * rowsPerPage + 1} to{" "}
+                    {Math.min(page * rowsPerPage, filteredUsers.length)} of {filteredUsers.length}
+                  </span>
+                  <Pagination
+                    isCompact
+                    showControls
+                    color="primary"
+                    page={page}
+                    total={totalPages}
+                    onChange={(p) => setPage(p)}
+                  />
+                </div>
+              ) : null
+            }
+          >
             <TableHeader>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">S.NO</TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">OFFICER NAME</TableColumn>
@@ -360,16 +417,16 @@ export default function UsersMasterPage() {
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
             </TableHeader>
             <TableBody
-              items={filteredUsers}
-              isLoading={loading}
-              loadingContent={
-                <div className="p-4 space-y-2">
-                  <Skeleton className="h-6 w-full rounded" />
-                  <Skeleton className="h-6 w-full rounded" />
-                  <Skeleton className="h-6 w-full rounded" />
-                </div>
+              items={paginatedUsers}
+              emptyContent={
+                loading ? (
+                  <div className="py-6 flex justify-center items-center gap-2 text-slate-500">
+                    <Spinner size="sm" /> Loading officers directory...
+                  </div>
+                ) : (
+                  "No officers found matching your search."
+                )
               }
-              emptyContent={!loading ? "No officers found matching your search." : " "}
             >
               {(u) => (
                 <TableRow key={u._id} className="border-b border-slate-100 hover:bg-slate-50/70">
@@ -431,121 +488,161 @@ export default function UsersMasterPage() {
         </CardBody>
       </Card>
 
-      {/* MODAL 1: Create New Staff User */}
-      <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top" size="lg">
+      {/* MODAL 1: Create New Staff User (Large 3XL Width) */}
+      <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="center" size="3xl">
         <ModalContent>
           {(onClose) => (
             <>
-              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100">
                 <span className="material-symbols-rounded text-blue-700">person_add</span>
                 Add Staff Member &amp; Credentials
               </ModalHeader>
-              <ModalBody className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    size="sm"
-                    label="Full Name"
-                    labelPlacement="outside"
-                    placeholder="e.g. Anand Kumar"
-                    value={formData.name}
-                    onValueChange={(v) => setFormData({ ...formData, name: v })}
-                    isRequired
-                  />
-                  <Select
-                    size="sm"
-                    label="Official Designation (Master)"
-                    labelPlacement="outside"
-                    items={designationItems}
-                    selectedKeys={formData.designation ? [formData.designation] : []}
-                    onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
-                    placeholder="Select designation..."
-                    isRequired
-                  >
-                    {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
-                  </Select>
+              <ModalBody className="py-4 space-y-4">
+                {/* Row 1: Basic Identifiers */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Full Officer Name <span className="text-red-500">*</span>
+                    </label>
+                    <Input
+                      size="sm"
+                      placeholder="e.g. Rajeshwar Singh"
+                      value={formData.name}
+                      onValueChange={(v) => setFormData({ ...formData, name: v })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Official Designation (Master) <span className="text-red-500">*</span>
+                    </label>
+                    <Select
+                      size="sm"
+                      items={designationItems}
+                      selectedKeys={formData.designation ? [formData.designation] : []}
+                      onChange={(e) => setFormData({ ...formData, designation: e.target.value })}
+                      placeholder="Select designation..."
+                    >
+                      {(item: SelectOption) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+                    </Select>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    size="sm"
-                    label="User ID / Login"
-                    labelPlacement="outside"
-                    placeholder="e.g. anand_legal"
-                    value={formData.username}
-                    onValueChange={(v) => setFormData({ ...formData, username: v })}
-                    isRequired
-                  />
-                  <Input
-                    size="sm"
-                    type="password"
-                    label="Initial Login Password"
-                    labelPlacement="outside"
-                    placeholder="••••••••"
-                    value={formData.password}
-                    onValueChange={(v) => setFormData({ ...formData, password: v })}
-                    isRequired
-                  />
+                {/* Row 2: Login Credentials */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      User ID / Login Username <span className="text-red-500">*</span>
+                    </label>
+                    <Input
+                      size="sm"
+                      placeholder="e.g. rajeshwar_oic"
+                      value={formData.username}
+                      onValueChange={(v) => setFormData({ ...formData, username: v })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Initial Password <span className="text-red-500">*</span>
+                    </label>
+                    <Input
+                      size="sm"
+                      type="password"
+                      placeholder="••••••••"
+                      value={formData.password}
+                      onValueChange={(v) => setFormData({ ...formData, password: v })}
+                    />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    size="sm"
-                    label="Mobile Number"
-                    labelPlacement="outside"
-                    placeholder="9454400000"
-                    value={formData.mobile}
-                    onValueChange={(v) => setFormData({ ...formData, mobile: v })}
-                  />
-                  <Input
-                    size="sm"
-                    label="Official Email"
-                    labelPlacement="outside"
-                    placeholder="officer@policeboard.in"
-                    value={formData.email}
-                    onValueChange={(v) => setFormData({ ...formData, email: v })}
-                  />
+                {/* Row 3: Contact Channels */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Mobile Number
+                    </label>
+                    <Input
+                      size="sm"
+                      placeholder="9454401001"
+                      value={formData.mobile}
+                      onValueChange={(v) => setFormData({ ...formData, mobile: v })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Official Email Address
+                    </label>
+                    <Input
+                      size="sm"
+                      placeholder="oic.recruitment@upprpb.gov.in"
+                      value={formData.email}
+                      onValueChange={(v) => setFormData({ ...formData, email: v })}
+                    />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <Select
-                    size="sm"
-                    label="Assigned Section / Wing (Master)"
-                    labelPlacement="outside"
-                    items={departmentItems}
-                    selectedKeys={formData.section ? [formData.section] : []}
-                    onChange={(e) => setFormData({ ...formData, section: e.target.value })}
-                    placeholder="Select department wing..."
-                    isRequired
-                  >
-                    {(dep) => <SelectItem key={dep.key}>{dep.label}</SelectItem>}
-                  </Select>
-
-                  <Select
-                    size="sm"
-                    label="Police Rank (Master)"
-                    labelPlacement="outside"
-                    items={rankItems}
-                    selectedKeys={formData.rank ? [formData.rank] : []}
-                    onChange={(e) => setFormData({ ...formData, rank: e.target.value })}
-                  >
-                    {(rk) => <SelectItem key={rk.key}>{rk.label}</SelectItem>}
-                  </Select>
+                {/* Row 4: Organizational Master Bindings */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Assigned Section / Wing (Master) <span className="text-red-500">*</span>
+                    </label>
+                    <Select
+                      size="sm"
+                      items={departmentItems}
+                      selectedKeys={formData.section ? [formData.section] : []}
+                      onChange={(e) => setFormData({ ...formData, section: e.target.value })}
+                      placeholder="Select department wing..."
+                    >
+                      {(dep: SelectOption) => <SelectItem key={dep.key}>{dep.label}</SelectItem>}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Police Rank Cadre (Master) <span className="text-red-500">*</span>
+                    </label>
+                    <Select
+                      size="sm"
+                      items={rankItems}
+                      selectedKeys={formData.rank ? [formData.rank] : []}
+                      onChange={(e) => setFormData({ ...formData, rank: e.target.value })}
+                    >
+                      {(rk: SelectOption) => <SelectItem key={rk.key}>{rk.label}</SelectItem>}
+                    </Select>
+                  </div>
                 </div>
 
-                <Select
-                  size="sm"
-                  label="Assign Dynamic RBAC Role"
-                  labelPlacement="outside"
-                  items={roleItems}
-                  selectedKeys={formData.roleId ? [formData.roleId] : []}
-                  onChange={(e) => setFormData({ ...formData, roleId: e.target.value })}
-                  placeholder="Select configured RBAC role..."
-                  isRequired
-                >
-                  {(r) => <SelectItem key={r.key}>{r.label}</SelectItem>}
-                </Select>
+                {/* Row 5: Role & Bench Jurisdiction */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Assign Dynamic RBAC Role <span className="text-red-500">*</span>
+                    </label>
+                    <Select
+                      size="sm"
+                      items={roleItems}
+                      selectedKeys={formData.roleId ? [formData.roleId] : []}
+                      onChange={(e) => setFormData({ ...formData, roleId: e.target.value })}
+                      placeholder="Select configured RBAC role..."
+                    >
+                      {(r: SelectOption) => <SelectItem key={r.key}>{r.label}</SelectItem>}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Court Bench Jurisdiction <span className="text-red-500">*</span>
+                    </label>
+                    <Select
+                      size="sm"
+                      items={COURT_BENCH_OPTIONS}
+                      selectedKeys={[formData.courtBench]}
+                      onChange={(e) => setFormData({ ...formData, courtBench: e.target.value })}
+                    >
+                      {(bench: SelectOption) => <SelectItem key={bench.key}>{bench.label}</SelectItem>}
+                    </Select>
+                  </div>
+                </div>
               </ModalBody>
-              <ModalFooter>
+              <ModalFooter className="border-t border-slate-100">
                 <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
@@ -564,89 +661,123 @@ export default function UsersMasterPage() {
         </ModalContent>
       </Modal>
 
-      {/* MODAL 2: Edit Staff User */}
-      <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top" size="lg">
+      {/* MODAL 2: Edit Staff User (Large 3XL Width) */}
+      <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="center" size="3xl">
         <ModalContent>
           {(onClose) => (
             <>
-              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
+              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100">
                 <span className="material-symbols-rounded text-blue-700">edit</span>
                 Edit User Profile: {editingUser?.username}
               </ModalHeader>
-              <ModalBody className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    size="sm"
-                    label="Full Name"
-                    labelPlacement="outside"
-                    value={editingUser?.name || ""}
-                    onValueChange={(v) => setEditingUser({ ...editingUser, name: v })}
-                    isRequired
-                  />
-                  <Select
-                    size="sm"
-                    label="Official Designation"
-                    labelPlacement="outside"
-                    items={designationItems}
-                    selectedKeys={editingUser?.designation ? [editingUser.designation] : []}
-                    onChange={(e) => setEditingUser({ ...editingUser, designation: e.target.value })}
-                  >
-                    {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
-                  </Select>
+              <ModalBody className="py-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Full Name <span className="text-red-500">*</span>
+                    </label>
+                    <Input
+                      size="sm"
+                      value={editingUser?.name || ""}
+                      onValueChange={(v) => setEditingUser({ ...editingUser, name: v })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Official Designation <span className="text-red-500">*</span>
+                    </label>
+                    <Select
+                      size="sm"
+                      items={designationItems}
+                      selectedKeys={editingUser?.designation ? [editingUser.designation] : []}
+                      onChange={(e) => setEditingUser({ ...editingUser, designation: e.target.value })}
+                    >
+                      {(item: SelectOption) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+                    </Select>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    size="sm"
-                    label="Mobile Number"
-                    labelPlacement="outside"
-                    value={editingUser?.mobile || ""}
-                    onValueChange={(v) => setEditingUser({ ...editingUser, mobile: v })}
-                  />
-                  <Input
-                    size="sm"
-                    label="Official Email"
-                    labelPlacement="outside"
-                    value={editingUser?.email || ""}
-                    onValueChange={(v) => setEditingUser({ ...editingUser, email: v })}
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Mobile Number
+                    </label>
+                    <Input
+                      size="sm"
+                      value={editingUser?.mobile || ""}
+                      onValueChange={(v) => setEditingUser({ ...editingUser, mobile: v })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Official Email
+                    </label>
+                    <Input
+                      size="sm"
+                      value={editingUser?.email || ""}
+                      onValueChange={(v) => setEditingUser({ ...editingUser, email: v })}
+                    />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <Select
-                    size="sm"
-                    label="Assigned Section / Wing"
-                    labelPlacement="outside"
-                    items={departmentItems}
-                    selectedKeys={editingUser?.section ? [editingUser.section] : []}
-                    onChange={(e) => setEditingUser({ ...editingUser, section: e.target.value })}
-                  >
-                    {(dep) => <SelectItem key={dep.key}>{dep.label}</SelectItem>}
-                  </Select>
-
-                  <Select
-                    size="sm"
-                    label="Assign Dynamic RBAC Role"
-                    labelPlacement="outside"
-                    items={roleItems}
-                    selectedKeys={editingUser?.roleId ? [editingUser.roleId] : []}
-                    onChange={(e) => setEditingUser({ ...editingUser, roleId: e.target.value })}
-                  >
-                    {(r) => <SelectItem key={r.key}>{r.label}</SelectItem>}
-                  </Select>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Assigned Section / Wing <span className="text-red-500">*</span>
+                    </label>
+                    <Select
+                      size="sm"
+                      items={departmentItems}
+                      selectedKeys={editingUser?.section ? [editingUser.section] : []}
+                      onChange={(e) => setEditingUser({ ...editingUser, section: e.target.value })}
+                    >
+                      {(dep: SelectOption) => <SelectItem key={dep.key}>{dep.label}</SelectItem>}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Assign Dynamic RBAC Role <span className="text-red-500">*</span>
+                    </label>
+                    <Select
+                      size="sm"
+                      items={roleItems}
+                      selectedKeys={editingUser?.roleId ? [editingUser.roleId] : []}
+                      onChange={(e) => setEditingUser({ ...editingUser, roleId: e.target.value })}
+                    >
+                      {(r: SelectOption) => <SelectItem key={r.key}>{r.label}</SelectItem>}
+                    </Select>
+                  </div>
                 </div>
 
-                <Input
-                  size="sm"
-                  type="password"
-                  label="Reset Password (Leave blank to keep unchanged)"
-                  labelPlacement="outside"
-                  placeholder="New password (optional)..."
-                  value={editingUser?.password || ""}
-                  onValueChange={(v) => setEditingUser({ ...editingUser, password: v })}
-                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Court Bench Jurisdiction <span className="text-red-500">*</span>
+                    </label>
+                    <Select
+                      size="sm"
+                      items={COURT_BENCH_OPTIONS}
+                      selectedKeys={[editingUser?.courtBench || "BOTH"]}
+                      onChange={(e) => setEditingUser({ ...editingUser, courtBench: e.target.value })}
+                    >
+                      {(bench: SelectOption) => <SelectItem key={bench.key}>{bench.label}</SelectItem>}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 block mb-1">
+                      Reset Password (Optional)
+                    </label>
+                    <Input
+                      size="sm"
+                      type="password"
+                      placeholder="Leave blank to keep unchanged"
+                      value={editingUser?.password || ""}
+                      onValueChange={(v) => setEditingUser({ ...editingUser, password: v })}
+                    />
+                  </div>
+                </div>
               </ModalBody>
-              <ModalFooter>
+              <ModalFooter className="border-t border-slate-100">
                 <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>

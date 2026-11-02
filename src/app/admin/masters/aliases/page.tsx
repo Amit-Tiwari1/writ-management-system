@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   CardBody,
@@ -30,43 +30,35 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
 
 import { MastersAPI } from "@/api/mastersApi";
-import { z } from "zod";
+import {
+  aliasSchema,
+  standingCounselSchema,
+  AliasFormValues,
+  StandingCounselFormValues,
+} from "@/schemas/masterSchema";
+import { IAliasItem, IStandingCounselItem } from "@/types/master.types";
 
-const aliasFormSchema = z.object({
-  keyword: z.string().min(2, "Keyword is required").trim(),
-  language: z.string().min(1, "Language is required"),
-  category: z.string().min(1, "Category is required"),
-  matchWeight: z.string().min(1, "Match weight is required"),
-});
+const LANGUAGE_OPTIONS = [
+  { key: "Hindi (Devanagari)", label: "Hindi (Devanagari Script)" },
+  { key: "English (Latin)", label: "English (Latin Script)" },
+  { key: "English (Abbr)", label: "English (Acronym / Abbreviation)" },
+  { key: "English (Colloquial)", label: "English (Colloquial / Slang)" },
+];
 
-type AliasFormValues = z.infer<typeof aliasFormSchema>;
+const CATEGORY_OPTIONS = [
+  { key: "Primary Institution Code", label: "Primary Institution Code" },
+  { key: "Informal Court Name", label: "Informal Court Name" },
+  { key: "Full Official Name", label: "Full Official Name" },
+  { key: "Representative Title", label: "Representative Title" },
+  { key: "Alternative Entity", label: "Alternative Entity" },
+];
 
-const standingCounselFormSchema = z.object({
-  name: z.string().min(2, "Advocate or office name is required").trim(),
-  monitoredBenches: z.string().min(2, "Monitored benches are required").trim(),
-  autoFlag: z.boolean(),
-});
-
-type StandingCounselFormValues = z.infer<typeof standingCounselFormSchema>;
-
-interface IAliasItem {
-  _id: string;
-  keyword: string;
-  language: string;
-  category: string;
-  matchWeight: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-interface IStandingCounselItem {
-  _id: string;
-  name: string;
-  monitoredBenches: string;
-  autoFlag: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-}
+const MATCH_WEIGHT_OPTIONS = [
+  { key: "Exact (100%)", label: "Exact (100% Match)" },
+  { key: "High (95%)", label: "High (95% Match)" },
+  { key: "High (90%)", label: "High (90% Match)" },
+  { key: "Medium (80%)", label: "Medium (80% Match)" },
+];
 
 export default function AliasesMasterPage() {
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
@@ -87,7 +79,7 @@ export default function AliasesMasterPage() {
     reset: resetAliasForm,
     formState: { errors: aliasErrors },
   } = useForm<AliasFormValues>({
-    resolver: zodResolver(aliasFormSchema),
+    resolver: zodResolver(aliasSchema) as any,
     defaultValues: {
       keyword: "",
       language: "Hindi (Devanagari)",
@@ -102,7 +94,7 @@ export default function AliasesMasterPage() {
     reset: resetAdvocateForm,
     formState: { errors: advocateErrors },
   } = useForm<StandingCounselFormValues>({
-    resolver: zodResolver(standingCounselFormSchema),
+    resolver: zodResolver(standingCounselSchema) as any,
     defaultValues: {
       name: "",
       monitoredBenches: "",
@@ -135,7 +127,12 @@ export default function AliasesMasterPage() {
       const res = await MastersAPI.createAlias(values);
       if (res?.success) {
         toast.success(res.message || "Alias pattern registered successfully");
-        resetAliasForm();
+        resetAliasForm({
+          keyword: "",
+          language: "Hindi (Devanagari)",
+          category: "Informal Court Name",
+          matchWeight: "High (90%)",
+        });
         onAddOpenChange();
         fetchData();
       } else {
@@ -151,16 +148,24 @@ export default function AliasesMasterPage() {
   const onAddAdvocate: SubmitHandler<StandingCounselFormValues> = async (values) => {
     try {
       setSubmitting(true);
-      const newItem: IStandingCounselItem = {
-        _id: Date.now().toString(),
-        name: values.name,
-        monitoredBenches: values.monitoredBenches,
+      const res = await MastersAPI.createStandingCounsel({
+        name: values.name.trim(),
+        monitoredBenches: values.monitoredBenches.trim(),
         autoFlag: values.autoFlag,
-      };
-      setStandingCounsels((prev) => [...prev, newItem]);
-      toast.success("Panel advocate added to monitoring queue");
-      resetAdvocateForm();
-      onAdvocateOpenChange();
+      });
+
+      if (res?.success) {
+        toast.success(res.message || "Panel advocate added to monitoring queue");
+        resetAdvocateForm({
+          name: "",
+          monitoredBenches: "",
+          autoFlag: true,
+        });
+        onAdvocateOpenChange();
+        fetchData();
+      } else {
+        toast.error(res?.message || "Failed to add panel advocate");
+      }
     } catch (err: any) {
       toast.error(err?.response?.data?.message || "Failed to add panel advocate");
     } finally {
@@ -210,13 +215,15 @@ export default function AliasesMasterPage() {
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
                 </Link>
-                <h1 className="text-base font-bold text-slate-900">6.10 Institutional Alias & Keyword Matrix</h1>
+                <h1 className="text-base font-bold text-slate-900">
+                  7.10 Institutional Alias &amp; Keyword Matrix
+                </h1>
                 <Chip size="sm" className="bg-amber-500/20 px-1 text-[10px] font-bold text-amber-700">
                   Cause List Matching Engine
                 </Chip>
               </div>
               <p className="text-xs text-slate-500 ml-9">
-                Manages acronyms, Hindi variations & advocate associations to power Screen 2.4 Inward Discovery Desk
+                Manages acronyms, Hindi variations &amp; advocate associations to power Screen 2.4 Inward Discovery Desk
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -227,7 +234,11 @@ export default function AliasesMasterPage() {
                 className="border-slate-200 bg-white text-xs font-semibold text-slate-700"
                 startContent={<span className="material-symbols-rounded text-sm">person_add</span>}
                 onPress={() => {
-                  resetAdvocateForm();
+                  resetAdvocateForm({
+                    name: "",
+                    monitoredBenches: "",
+                    autoFlag: true,
+                  });
                   onAdvocateOpen();
                 }}
               >
@@ -239,7 +250,12 @@ export default function AliasesMasterPage() {
                 className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
                 startContent={<span className="material-symbols-rounded text-sm">add</span>}
                 onPress={() => {
-                  resetAliasForm();
+                  resetAliasForm({
+                    keyword: "",
+                    language: "Hindi (Devanagari)",
+                    category: "Informal Court Name",
+                    matchWeight: "High (90%)",
+                  });
                   onAddOpen();
                 }}
               >
@@ -272,7 +288,7 @@ export default function AliasesMasterPage() {
             <div className="flex flex-col justify-between rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-900">
               <span className="font-bold">Active Engine Status:</span>
               <p className="text-[11px] mt-1">
-                Scanning daily cause lists for <b>{aliasList.length} synonyms</b> across Allahabad & Lucknow registries.
+                Scanning daily cause lists for <b>{aliasList.length} synonyms</b> across Allahabad &amp; Lucknow registries.
               </p>
             </div>
           </div>
@@ -407,16 +423,18 @@ export default function AliasesMasterPage() {
                   name="keyword"
                   control={aliasControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Keyword / Search Pattern"
-                      labelPlacement="outside"
-                      placeholder="e.g. उत्तर प्रदेश पुलिस बोर्ड"
-                      isInvalid={!!aliasErrors.keyword}
-                      errorMessage={aliasErrors.keyword?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Keyword / Search Pattern <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. उत्तर प्रदेश पुलिस बोर्ड"
+                        isInvalid={!!aliasErrors.keyword}
+                        errorMessage={aliasErrors.keyword?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -424,19 +442,21 @@ export default function AliasesMasterPage() {
                   name="language"
                   control={aliasControl}
                   render={({ field }) => (
-                    <Select
-                      size="sm"
-                      label="Script / Language Classification"
-                      labelPlacement="outside"
-                      selectedKeys={[field.value]}
-                      onChange={(e) => field.onChange(e.target.value)}
-                      isRequired
-                    >
-                      <SelectItem key="Hindi (Devanagari)">Hindi (Devanagari Script)</SelectItem>
-                      <SelectItem key="English (Latin)">English (Latin Script)</SelectItem>
-                      <SelectItem key="English (Abbr)">English (Acronym / Abbreviation)</SelectItem>
-                      <SelectItem key="English (Colloquial)">English (Colloquial / Slang)</SelectItem>
-                    </Select>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Script / Language Classification <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={LANGUAGE_OPTIONS}
+                        selectedKeys={[field.value]}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!aliasErrors.language}
+                        errorMessage={aliasErrors.language?.message}
+                      >
+                        {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+                      </Select>
+                    </div>
                   )}
                 />
 
@@ -444,20 +464,21 @@ export default function AliasesMasterPage() {
                   name="category"
                   control={aliasControl}
                   render={({ field }) => (
-                    <Select
-                      size="sm"
-                      label="Entity Category"
-                      labelPlacement="outside"
-                      selectedKeys={[field.value]}
-                      onChange={(e) => field.onChange(e.target.value)}
-                      isRequired
-                    >
-                      <SelectItem key="Primary Institution Code">Primary Institution Code</SelectItem>
-                      <SelectItem key="Informal Court Name">Informal Court Name</SelectItem>
-                      <SelectItem key="Full Official Name">Full Official Name</SelectItem>
-                      <SelectItem key="Representative Title">Representative Title</SelectItem>
-                      <SelectItem key="Alternative Entity">Alternative Entity</SelectItem>
-                    </Select>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Entity Category <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={CATEGORY_OPTIONS}
+                        selectedKeys={[field.value]}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!aliasErrors.category}
+                        errorMessage={aliasErrors.category?.message}
+                      >
+                        {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+                      </Select>
+                    </div>
                   )}
                 />
 
@@ -465,19 +486,21 @@ export default function AliasesMasterPage() {
                   name="matchWeight"
                   control={aliasControl}
                   render={({ field }) => (
-                    <Select
-                      size="sm"
-                      label="Match Weight Level"
-                      labelPlacement="outside"
-                      selectedKeys={[field.value]}
-                      onChange={(e) => field.onChange(e.target.value)}
-                      isRequired
-                    >
-                      <SelectItem key="Exact (100%)">Exact (100% Match)</SelectItem>
-                      <SelectItem key="High (95%)">High (95% Match)</SelectItem>
-                      <SelectItem key="High (90%)">High (90% Match)</SelectItem>
-                      <SelectItem key="Medium (80%)">Medium (80% Match)</SelectItem>
-                    </Select>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Match Weight Level <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={MATCH_WEIGHT_OPTIONS}
+                        selectedKeys={[field.value]}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!aliasErrors.matchWeight}
+                        errorMessage={aliasErrors.matchWeight?.message}
+                      >
+                        {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+                      </Select>
+                    </div>
                   )}
                 />
               </ModalBody>
@@ -514,16 +537,18 @@ export default function AliasesMasterPage() {
                   name="name"
                   control={advocateControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Advocate / Office Name"
-                      labelPlacement="outside"
-                      placeholder="e.g. Additional Chief Standing Counsel (LKO)"
-                      isInvalid={!!advocateErrors.name}
-                      errorMessage={advocateErrors.name?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Advocate / Office Name <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. Additional Chief Standing Counsel (LKO)"
+                        isInvalid={!!advocateErrors.name}
+                        errorMessage={advocateErrors.name?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -531,16 +556,18 @@ export default function AliasesMasterPage() {
                   name="monitoredBenches"
                   control={advocateControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Monitored Benches / Court Halls"
-                      labelPlacement="outside"
-                      placeholder="e.g. Court No. 1, Court No. 18, Division Bench"
-                      isInvalid={!!advocateErrors.monitoredBenches}
-                      errorMessage={advocateErrors.monitoredBenches?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Monitored Benches / Court Halls <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. Court No. 1, Court No. 18, Division Bench"
+                        isInvalid={!!advocateErrors.monitoredBenches}
+                        errorMessage={advocateErrors.monitoredBenches?.message}
+                      />
+                    </div>
                   )}
                 />
               </ModalBody>

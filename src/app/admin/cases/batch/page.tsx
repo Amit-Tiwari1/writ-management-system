@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, useCallback, Suspense } from "react";
+import React, { useState, useMemo, useEffect, useCallback, Suspense, useRef } from "react";
 import {
   Card,
   CardBody,
@@ -39,10 +39,8 @@ interface PetitionerRecord {
   name: string;
   fatherName?: string;
   role: "Lead Petitioner" | "Co-Petitioner";
-  categoryClaimed?: string;
-  postClaimed?: string;
-  state?: string;
   district: string;
+  state?: string;
   status: "ACTIVE" | "WITHDRAWN" | "DISMISSED_ON_MERIT" | "RELIEF_GRANTED";
   createdAt?: string;
 }
@@ -52,19 +50,22 @@ interface CaseOption {
   fileNo: string;
   writNumber?: string;
   leadPetitioner: string;
-  category: string;
 }
 
 interface DistrictOption {
   key: string;
   label: string;
-  zone: string;
-  state: string;
+}
+
+interface SelectItemType {
+  key: string;
+  label: string;
 }
 
 function BatchCoPetitionersContent() {
   const searchParams = useSearchParams();
   const queryCaseId = searchParams.get("caseId");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { isOpen: isCsvOpen, onOpen: onCsvOpen, onOpenChange: onCsvOpenChange } = useDisclosure();
   const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
@@ -77,20 +78,18 @@ function BatchCoPetitionersContent() {
   const [loadingCases, setLoadingCases] = useState<boolean>(true);
   const [loadingPetitioners, setLoadingPetitioners] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isUploadingFile, setIsUploadingFile] = useState<boolean>(false);
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
-  const rowsPerPage = 6;
+  const rowsPerPage = 8;
 
   const [formData, setFormData] = useState({
     rollNo: "",
-    registrationNo: "",
     name: "",
     fatherName: "",
-    postClaimed: "Constable Civil Police",
     district: "Lucknow",
-    zone: "Lucknow Zone",
-    state: "Uttar Pradesh",
   });
 
   const [editingItem, setEditingItem] = useState<PetitionerRecord | null>(null);
@@ -100,7 +99,7 @@ function BatchCoPetitionersContent() {
       try {
         setLoadingCases(true);
         const [casesRes, dropdownRes] = await Promise.all([
-          axiosClient.get("/cases", { params: { limit: 100 } }),
+          axiosClient.get("/cases", { params: { limit: 150 } }),
           MastersAPI.getIntakeDropdowns(),
         ]);
 
@@ -114,23 +113,23 @@ function BatchCoPetitionersContent() {
         }
 
         if (dropdownRes?.success && dropdownRes.data?.districts) {
-          const mappedDistricts = dropdownRes.data.districts.map((d: any) => ({
+          const mappedDistricts: DistrictOption[] = dropdownRes.data.districts.map((d: any) => ({
             key: d.districtName,
             label: d.districtName,
-            zone: d.zoneId?.zoneName || "Central Zone",
-            state: d.stateId?.stateName || "Uttar Pradesh",
           }));
           setDistricts(mappedDistricts);
         } else {
           setDistricts([
-            { key: "Lucknow", label: "Lucknow", zone: "Lucknow Zone", state: "Uttar Pradesh" },
-            { key: "Prayagraj", label: "Prayagraj", zone: "Prayagraj Zone", state: "Uttar Pradesh" },
-            { key: "Kanpur Nagar", label: "Kanpur Nagar", zone: "Kanpur Zone", state: "Uttar Pradesh" },
-            { key: "Varanasi", label: "Varanasi", zone: "Varanasi Zone", state: "Uttar Pradesh" },
-            { key: "Gorakhpur", label: "Gorakhpur", zone: "Gorakhpur Zone", state: "Uttar Pradesh" },
-            { key: "Meerut", label: "Meerut", zone: "Meerut Zone", state: "Uttar Pradesh" },
-            { key: "Agra", label: "Agra", zone: "Agra Zone", state: "Uttar Pradesh" },
-            { key: "Bareilly", label: "Bareilly", zone: "Bareilly Zone", state: "Uttar Pradesh" },
+            { key: "Lucknow", label: "Lucknow" },
+            { key: "Prayagraj", label: "Prayagraj" },
+            { key: "Kanpur Nagar", label: "Kanpur Nagar" },
+            { key: "Varanasi", label: "Varanasi" },
+            { key: "Gorakhpur", label: "Gorakhpur" },
+            { key: "Meerut", label: "Meerut" },
+            { key: "Agra", label: "Agra" },
+            { key: "Bareilly", label: "Bareilly" },
+            { key: "Pratapgarh", label: "Pratapgarh" },
+            { key: "Unnao", label: "Unnao" },
           ]);
         }
       } catch (err: any) {
@@ -165,24 +164,14 @@ function BatchCoPetitionersContent() {
     }
   }, [selectedCaseId, fetchPetitionersForCase]);
 
-  const handleDistrictChange = (districtName: string) => {
-    const found = districts.find((d) => d.key === districtName);
-    setFormData((prev) => ({
-      ...prev,
-      district: districtName,
-      zone: found ? found.zone : "Central Zone",
-      state: found ? found.state : "Uttar Pradesh",
-    }));
-  };
-
   const handleAddPetitioner = async () => {
     if (!formData.rollNo.trim() || !formData.name.trim()) {
-      toast.error("Roll Number and Petitioner Name are required!");
+      toast.error("Roll Number and Candidate Name are mandatory (*)");
       return;
     }
 
     if (!selectedCaseId) {
-      toast.error("Please select a valid parent writ case.");
+      toast.error("Please select a parent writ docket.");
       return;
     }
 
@@ -190,35 +179,58 @@ function BatchCoPetitionersContent() {
     try {
       const payload = {
         rollNo: formData.rollNo.trim(),
-        registrationNo: formData.registrationNo.trim() || "--",
         name: formData.name.trim(),
         fatherName: formData.fatherName.trim() || "--",
-        postClaimed: formData.postClaimed.trim() || "Constable Civil Police",
         district: formData.district,
-        state: formData.state,
+        state: "Uttar Pradesh",
         role: petitioners.length === 0 ? "Lead Petitioner" : "Co-Petitioner",
         status: "ACTIVE",
       };
 
       const res = await axiosClient.post(`/cases/${selectedCaseId}/petitioners`, payload);
       if (res.data?.success) {
-        toast.success(`Petitioner ${payload.name} added successfully!`);
+        toast.success(`Candidate ${payload.name} added to docket roster!`);
         setFormData({
           rollNo: "",
-          registrationNo: "",
           name: "",
           fatherName: "",
-          postClaimed: "Constable Civil Police",
           district: "Lucknow",
-          zone: "Lucknow Zone",
-          state: "Uttar Pradesh",
         });
         fetchPetitionersForCase(selectedCaseId);
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to add petitioner");
+      toast.error(err.response?.data?.message || "Failed to add candidate");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedCaseId) return;
+
+    const formDataUpload = new FormData();
+    formDataUpload.append("file", file);
+
+    setIsUploadingFile(true);
+    const toastId = toast.loading("Ingesting and validating batch file...");
+    try {
+      const res = await axiosClient.post(
+        `/cases/${selectedCaseId}/petitioners/upload-file`,
+        formDataUpload,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+
+      if (res.data?.success) {
+        toast.success(res.data.message || "Bulk petitioners imported successfully!", { id: toastId });
+        onCsvOpenChange();
+        fetchPetitionersForCase(selectedCaseId);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to import file.", { id: toastId });
+    } finally {
+      setIsUploadingFile(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -229,19 +241,33 @@ function BatchCoPetitionersContent() {
 
   const handleSaveEdit = async () => {
     if (!editingItem) return;
+    setIsSavingEdit(true);
     try {
-      setPetitioners((prev) =>
-        prev.map((p) => (p._id === editingItem._id ? { ...editingItem } : p))
+      const res = await axiosClient.put(
+        `/cases/${selectedCaseId}/petitioners/${editingItem._id}`,
+        {
+          rollNo: editingItem.rollNo,
+          name: editingItem.name,
+          fatherName: editingItem.fatherName,
+          district: editingItem.district,
+          status: editingItem.status,
+        }
       );
-      toast.success("Petitioner record updated");
-      onEditOpenChange();
-      setEditingItem(null);
+
+      if (res.data?.success) {
+        toast.success("Petitioner record updated successfully");
+        onEditOpenChange();
+        setEditingItem(null);
+        fetchPetitionersForCase(selectedCaseId);
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Failed to update record");
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
-  const caseSelectItems = useMemo(() => {
+  const caseSelectItems: SelectItemType[] = useMemo(() => {
     return casesList.map((c) => ({
       key: c._id,
       label: `${c.fileNo} · ${c.writNumber || "Notice"} — ${c.leadPetitioner}`,
@@ -271,10 +297,10 @@ function BatchCoPetitionersContent() {
 
   return (
     <div className="space-y-4">
-      {/* 1. Header & Case Selector Bar */}
+      {/* 1. Header & Extended Case Selector Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <Link href="/admin/cases">
@@ -286,9 +312,12 @@ function BatchCoPetitionersContent() {
                 <Chip size="sm" color="primary" variant="flat" className="text-[10px] font-bold">
                   Batch Litigation Manager
                 </Chip>
+                <Chip size="sm" variant="bordered" className="text-[10px] font-extrabold text-[#0f2744] border-slate-300">
+                  Total: {petitioners.length} Litigants
+                </Chip>
               </div>
               <p className="text-xs text-slate-500 ml-9">
-                Manage batch petitions, candidates, roll numbers &amp; geographical masters (District/Zone/State)[cite: 1]
+                Manage candidate roll numbers, names, father names and home districts for batch litigation dockets.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -296,11 +325,11 @@ function BatchCoPetitionersContent() {
                 size="sm"
                 variant="bordered"
                 radius="sm"
-                className="border-slate-200 bg-white text-xs font-semibold text-slate-700"
-                startContent={<span className="material-symbols-rounded text-sm">upload_file</span>}
+                className="border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                startContent={<span className="material-symbols-rounded text-sm text-blue-700">upload_file</span>}
                 onPress={onCsvOpen}
               >
-                Bulk CSV Import
+                Bulk Excel / CSV Import
               </Button>
               <Link href="/admin/cases">
                 <Button
@@ -316,13 +345,14 @@ function BatchCoPetitionersContent() {
             </div>
           </div>
 
-          {/* Target Parent Writ Switcher */}
-          <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
+          {/* Wider 50% - 50% Case Switcher & Search Bar */}
+          <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2">
             <Select
               size="sm"
               radius="sm"
               label="Select Parent Writ Matter"
               labelPlacement="outside"
+              placeholder="Search or pick writ docket..."
               items={caseSelectItems}
               selectedKeys={selectedCaseId ? [selectedCaseId] : []}
               onChange={(e) => {
@@ -332,37 +362,30 @@ function BatchCoPetitionersContent() {
                 }
               }}
               isLoading={loadingCases}
-              className="bg-slate-50 font-semibold"
+              className="bg-slate-50 font-semibold w-full"
             >
-              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+              {(item: SelectItemType) => <SelectItem key={item.key}>{item.label}</SelectItem>}
             </Select>
 
             <Input
               size="sm"
               radius="sm"
-              label="Search Petitioner Name / Roll No. / District"
+              label="Search Candidate by Roll No. / Name / District"
               labelPlacement="outside"
-              placeholder="e.g. 21004921 or Varanasi"
+              placeholder="e.g. 2401892, Ramesh or Lucknow"
               value={searchQuery}
               onValueChange={(val) => {
                 setSearchQuery(val);
                 setPage(1);
               }}
               startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
-              className="bg-slate-50"
+              className="bg-slate-50 w-full"
             />
-
-            <div className="flex items-end gap-2">
-              <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-900 flex items-center justify-between w-full border border-blue-200">
-                <span>Attached Candidates for this Writ:</span>
-                <span className="font-bold text-sm text-blue-700">{petitioners.length} Litigants</span>
-              </div>
-            </div>
           </div>
         </CardBody>
       </Card>
 
-      {/* 2. Main Table Grid with Geographical Columns */}
+      {/* 2. Candidate Table: Alert aur Delete Button Permanently Removed */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
           <Table
@@ -390,25 +413,25 @@ function BatchCoPetitionersContent() {
           >
             <TableHeader>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                PETITIONER ROLE
+                ROLE
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                ROLL NO.
+                ROLL NO. / PNO
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                NAME &amp; FATHER&apos;S NAME
+                CANDIDATE NAME
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                POST CLAIMED
+                FATHER&apos;S NAME
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                GEOGRAPHICAL MASTER (DISTRICT / STATE)
+                HOME DISTRICT
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 LEGAL STATUS
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
-                ACTIONS
+                ACTION
               </TableColumn>
             </TableHeader>
             <TableBody
@@ -421,7 +444,7 @@ function BatchCoPetitionersContent() {
                   <Skeleton className="h-6 w-full rounded" />
                 </div>
               }
-              emptyContent={!loadingPetitioners ? "No petitioners found for this writ case." : " "}
+              emptyContent={!loadingPetitioners ? "No candidate records logged for this writ docket." : " "}
             >
               {(item: PetitionerRecord) => (
                 <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
@@ -436,19 +459,17 @@ function BatchCoPetitionersContent() {
                       </Chip>
                     )}
                   </TableCell>
-                  <TableCell className="font-mono text-xs font-bold text-slate-900">
+                  <TableCell className="font-mono text-xs font-bold text-blue-700">
                     {item.rollNo}
                   </TableCell>
-                  <TableCell>
-                    <p className="text-xs font-semibold text-slate-900">{item.name}</p>
-                    <p className="text-[10px] text-slate-400">S/o {item.fatherName || "--"}</p>
+                  <TableCell className="text-xs font-bold text-slate-900">
+                    {item.name}
                   </TableCell>
-                  <TableCell className="text-xs text-slate-700">{item.postClaimed || "--"}</TableCell>
-                  <TableCell>
-                    <div className="space-y-0.5">
-                      <p className="text-xs font-bold text-slate-800">{item.district}</p>
-                      <p className="text-[10px] text-slate-500">{item.state || "Uttar Pradesh"}</p>
-                    </div>
+                  <TableCell className="text-xs text-slate-600">
+                    {item.fatherName || "--"}
+                  </TableCell>
+                  <TableCell className="text-xs font-semibold text-slate-800">
+                    {item.district}
                   </TableCell>
                   <TableCell>
                     <Chip
@@ -471,7 +492,7 @@ function BatchCoPetitionersContent() {
                       isIconOnly
                       size="sm"
                       variant="light"
-                      className="text-slate-500 hover:text-blue-700"
+                      className="text-slate-600 hover:text-blue-700"
                       onClick={() => openEditModal(item)}
                     >
                       <span className="material-symbols-rounded text-sm">edit</span>
@@ -484,7 +505,7 @@ function BatchCoPetitionersContent() {
         </CardBody>
       </Card>
 
-      {/* 3. Manual Add Form Card */}
+      {/* 3. Streamlined Manual Add Form */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4 space-y-3">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
@@ -492,23 +513,23 @@ function BatchCoPetitionersContent() {
               Add Individual Co-Petitioner to {currentCase?.fileNo || "Selected Docket"}
             </h3>
             <span className="text-[10px] text-slate-400">
-              District dropdown binds to 6.1 Geographical Master
+              District dropdown synchronized with 7.1 Geographical Master
             </span>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-5 items-end">
             <Input
               size="sm"
-              label="Roll No."
+              label="Candidate Roll No. *"
               labelPlacement="outside"
-              placeholder="e.g. 21008891"
+              placeholder="e.g. 2401895"
               value={formData.rollNo}
               onValueChange={(v) => setFormData({ ...formData, rollNo: v })}
               isRequired
             />
             <Input
               size="sm"
-              label="Candidate Name"
+              label="Candidate Name *"
               labelPlacement="outside"
               placeholder="Candidate Name"
               value={formData.name}
@@ -523,53 +544,33 @@ function BatchCoPetitionersContent() {
               value={formData.fatherName}
               onValueChange={(v) => setFormData({ ...formData, fatherName: v })}
             />
-            <Input
-              size="sm"
-              label="Rank / Post Claimed"
-              labelPlacement="outside"
-              placeholder="e.g. Constable CP"
-              value={formData.postClaimed}
-              onValueChange={(v) => setFormData({ ...formData, postClaimed: v })}
-            />
-
-            {/* Master-Aligned District Dropdown */}
             <Select
               size="sm"
-              label="Home District (Master)"
+              label="Home District (Master) *"
               labelPlacement="outside"
               items={districts}
               selectedKeys={[formData.district]}
-              onChange={(e) => handleDistrictChange(e.target.value)}
+              onChange={(e) => setFormData({ ...formData, district: e.target.value })}
               className="font-medium"
             >
-              {(d) => <SelectItem key={d.key}>{d.label}</SelectItem>}
+              {(d: DistrictOption) => <SelectItem key={d.key}>{d.label}</SelectItem>}
             </Select>
 
-            {/* Resolved Zone Display + Add Button */}
-            <div className="flex items-end gap-2">
-              <Input
-                size="sm"
-                isReadOnly
-                label="Police Zone (Auto)"
-                labelPlacement="outside"
-                value={formData.zone}
-                className="bg-slate-50 font-semibold"
-              />
-              <Button
-                size="sm"
-                radius="sm"
-                isLoading={isSubmitting}
-                className="bg-[#0f2744] text-xs font-semibold text-white hover:bg-[#163a66] min-w-[70px]"
-                onClick={handleAddPetitioner}
-              >
-                Add
-              </Button>
-            </div>
+            <Button
+              size="sm"
+              radius="sm"
+              isLoading={isSubmitting}
+              className="bg-[#0f2744] text-xs font-semibold text-white hover:bg-[#163a66] w-full"
+              startContent={!isSubmitting && <span className="material-symbols-rounded text-sm">person_add</span>}
+              onClick={handleAddPetitioner}
+            >
+              Add Co-Petitioner
+            </Button>
           </div>
         </CardBody>
       </Card>
 
-      {/* 4. Edit Individual Petitioner Modal */}
+      {/* 4. Edit Individual Petitioner Modal (Status Change Enabled Here) */}
       <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
@@ -580,7 +581,7 @@ function BatchCoPetitionersContent() {
               <ModalBody className="space-y-3">
                 <Input
                   size="sm"
-                  label="Roll Number"
+                  label="Roll Number / PNO *"
                   labelPlacement="outside"
                   value={editingItem?.rollNo || ""}
                   onValueChange={(v) =>
@@ -589,7 +590,7 @@ function BatchCoPetitionersContent() {
                 />
                 <Input
                   size="sm"
-                  label="Petitioner Name"
+                  label="Petitioner Name *"
                   labelPlacement="outside"
                   value={editingItem?.name || ""}
                   onValueChange={(v) =>
@@ -617,7 +618,7 @@ function BatchCoPetitionersContent() {
                     setEditingItem(editingItem ? { ...editingItem, district: e.target.value } : null)
                   }
                 >
-                  {(d) => <SelectItem key={d.key}>{d.label}</SelectItem>}
+                  {(d: DistrictOption) => <SelectItem key={d.key}>{d.label}</SelectItem>}
                 </Select>
 
                 <Select
@@ -638,12 +639,13 @@ function BatchCoPetitionersContent() {
                 </Select>
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSavingEdit}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
                   radius="sm"
+                  isLoading={isSavingEdit}
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
                   onClick={handleSaveEdit}
                 >
@@ -666,23 +668,31 @@ function BatchCoPetitionersContent() {
               </ModalHeader>
               <ModalBody className="space-y-4">
                 <p className="text-xs text-slate-500">
-                  Upload an Excel (.xlsx) or CSV file with candidate roll numbers, names, and districts to append directly to{" "}
+                  Select a CSV file containing candidate records to append directly to{" "}
                   <b>{currentCase?.fileNo || "Selected Case"}</b>.
                 </p>
+
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".csv,.txt"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                />
+
                 <div
-                  onClick={() => {
-                    toast.success("Parsed sample CSV rows into candidate queue!");
-                    onCsvOpenChange();
-                  }}
-                  className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 p-6 text-center hover:bg-slate-50/50 cursor-pointer transition-colors"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 p-8 text-center hover:bg-slate-50/70 cursor-pointer transition-colors"
                 >
                   <span className="material-symbols-rounded text-4xl text-blue-700">cloud_upload</span>
-                  <p className="mt-2 text-xs font-bold text-slate-800">Click to Upload &amp; Parse CSV</p>
-                  <p className="text-[10px] text-slate-400 mt-1">Columns: RollNo, CandidateName, FatherName, District</p>
+                  <p className="mt-2 text-xs font-bold text-slate-800">
+                    {isUploadingFile ? "Parsing & Uploading File..." : "Click to Browse CSV File"}
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-1">Format: RollNo, CandidateName, FatherName, District</p>
                 </div>
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isUploadingFile}>
                   Cancel
                 </Button>
               </ModalFooter>

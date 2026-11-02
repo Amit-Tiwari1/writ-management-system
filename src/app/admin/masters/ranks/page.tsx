@@ -21,32 +21,20 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
-  Skeleton,
+  Pagination,
+  Spinner,
 } from "@nextui-org/react";
 import Link from "next/link";
-import { useForm, Controller, SubmitHandler } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
+
 import { MastersAPI } from "@/api/mastersApi";
+import { rankSchema } from "@/schemas/masterSchema";
+import { IRankItem } from "@/types/master.types";
 import { z } from "zod";
 
-const rankFormSchema = z.object({
-  rankName: z.string().min(2, "Rank name is required").trim(),
-  shortCode: z.string().min(2, "Short code is required").toUpperCase().trim(),
-  cadreType: z.string().min(1, "Cadre type is required"),
-  payLevelGrade: z.string().min(1, "Pay level grade is required"),
-});
-
-type RankFormValues = z.infer<typeof rankFormSchema>;
-
-interface RankRecord {
-  _id: string;
-  rankName: string;
-  shortCode: string;
-  cadreType: string;
-  payLevelGrade: string;
-  createdAt?: string;
-}
+type RankFormValues = z.infer<typeof rankSchema>;
 
 const CADRE_ITEMS = [
   { key: "Non-Gazetted", label: "Non-Gazetted" },
@@ -79,23 +67,27 @@ export default function RankMasterPage() {
   const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
 
-  const [ranks, setRanks] = useState<RankRecord[]>([]);
+  const [ranks, setRanks] = useState<IRankItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCadreFilter, setSelectedCadreFilter] = useState("ALL");
 
-  const [editingRank, setEditingRank] = useState<RankRecord | null>(null);
-  const [rankToDelete, setRankToDelete] = useState<RankRecord | null>(null);
+  const [page, setPage] = useState(1);
+  const rowsPerPage = 8;
 
+  const [editingRank, setEditingRank] = useState<IRankItem | null>(null);
+  const [rankToDelete, setRankToDelete] = useState<IRankItem | null>(null);
+
+  // 1. Add Form
   const {
     control: addControl,
     handleSubmit: handleAddSubmit,
     reset: resetAddForm,
     formState: { errors: addErrors },
   } = useForm<RankFormValues>({
-    resolver: zodResolver(rankFormSchema),
+    resolver: zodResolver(rankSchema) as any,
     defaultValues: {
       rankName: "",
       shortCode: "",
@@ -104,13 +96,14 @@ export default function RankMasterPage() {
     },
   });
 
+  // 2. Edit Form
   const {
     control: editControl,
     handleSubmit: handleEditSubmit,
     reset: resetEditForm,
     formState: { errors: editErrors },
   } = useForm<RankFormValues>({
-    resolver: zodResolver(rankFormSchema),
+    resolver: zodResolver(rankSchema) as any,
     defaultValues: {
       rankName: "",
       shortCode: "",
@@ -122,17 +115,19 @@ export default function RankMasterPage() {
   const fetchRanks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await MastersAPI.getRanks();
+      const res = await MastersAPI.getRanks({
+        limit: 100,
+        cadreType: selectedCadreFilter !== "ALL" ? selectedCadreFilter : undefined,
+      });
       if (res?.success) {
         setRanks(res.data || []);
       }
     } catch (err: any) {
-      console.error("[RankMaster] Error fetching ranks:", err);
       toast.error(err.response?.data?.message || "Failed to load rank masters");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedCadreFilter]);
 
   useEffect(() => {
     fetchRanks();
@@ -148,7 +143,7 @@ export default function RankMasterPage() {
     onAddOpen();
   };
 
-  const onAddRank: SubmitHandler<RankFormValues> = async (values) => {
+  const onAddRank = async (values: RankFormValues) => {
     setIsSubmitting(true);
     try {
       const payload = {
@@ -171,31 +166,34 @@ export default function RankMasterPage() {
     }
   };
 
-  const handleOpenEdit = (item: RankRecord) => {
+  const handleOpenEdit = (item: IRankItem) => {
     setEditingRank(item);
     resetEditForm({
       rankName: item.rankName,
       shortCode: item.shortCode,
-      cadreType: item.cadreType,
-      payLevelGrade: item.payLevelGrade,
+      cadreType: item.cadreType || "Non-Gazetted",
+      payLevelGrade: item.payLevelGrade || "Pay Level 3",
     });
     onEditOpen();
   };
 
-  const onSaveEdit: SubmitHandler<RankFormValues> = async (values) => {
+  const onSaveEdit = async (values: RankFormValues) => {
     if (!editingRank) return;
+    setIsSubmitting(true);
     try {
-      setIsSubmitting(true);
-      setRanks((prev) =>
-        prev.map((r) =>
-          r._id === editingRank._id
-            ? { ...r, ...values, shortCode: values.shortCode.toUpperCase() }
-            : r
-        )
-      );
-      toast.success(`Updated ${values.shortCode}`);
+      const payload = {
+        _id: editingRank._id,
+        rankName: values.rankName.trim(),
+        shortCode: values.shortCode.trim().toUpperCase(),
+        cadreType: values.cadreType,
+        payLevelGrade: values.payLevelGrade,
+      };
+
+      await MastersAPI.createRank(payload);
+      toast.success(`Updated ${payload.shortCode}`);
       onEditOpenChange();
       setEditingRank(null);
+      fetchRanks();
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Failed to update rank");
     } finally {
@@ -203,17 +201,24 @@ export default function RankMasterPage() {
     }
   };
 
-  const handleOpenDelete = (item: RankRecord) => {
+  const handleOpenDelete = (item: IRankItem) => {
     setRankToDelete(item);
     onDeleteOpen();
   };
 
   const handleConfirmDelete = async () => {
     if (!rankToDelete) return;
-    setRanks((prev) => prev.filter((r) => r._id !== rankToDelete._id));
-    toast.success(`Rank ${rankToDelete.shortCode} removed.`);
-    onDeleteOpenChange();
-    setRankToDelete(null);
+    setIsSubmitting(true);
+    try {
+      setRanks((prev) => prev.filter((r) => r._id !== rankToDelete._id));
+      toast.success(`Rank ${rankToDelete.shortCode} removed.`);
+      onDeleteOpenChange();
+      setRankToDelete(null);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to delete rank");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const filteredRanks = useMemo(() => {
@@ -230,9 +235,15 @@ export default function RankMasterPage() {
     });
   }, [ranks, searchQuery, selectedCadreFilter]);
 
+  const totalPages = Math.ceil(filteredRanks.length / rowsPerPage) || 1;
+  const paginatedRanks = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    return filteredRanks.slice(start, start + rowsPerPage);
+  }, [filteredRanks, page, rowsPerPage]);
+
   return (
     <div className="space-y-4">
-      {/* Header Info */}
+      {/* 1. Header Information Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -243,7 +254,7 @@ export default function RankMasterPage() {
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
                 </Link>
-                <h1 className="text-base font-bold text-slate-900">6.3 Rank & Service Cadre Master</h1>
+                <h1 className="text-base font-bold text-slate-900">7.3 Rank & Service Cadre Master</h1>
                 <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
                   {ranks.length} Ranks Configured
                 </Chip>
@@ -263,14 +274,17 @@ export default function RankMasterPage() {
             </Button>
           </div>
 
-          {/* Filters Bar */}
+          {/* Quick Filters */}
           <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
             <Input
               size="sm"
               radius="sm"
               placeholder="Search rank title, short code or pay level..."
               value={searchQuery}
-              onValueChange={setSearchQuery}
+              onValueChange={(val) => {
+                setSearchQuery(val);
+                setPage(1);
+              }}
               startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
               className="bg-slate-50 sm:col-span-2"
             />
@@ -281,8 +295,11 @@ export default function RankMasterPage() {
               placeholder="Filter by Cadre Type"
               items={CADRE_FILTER_ITEMS}
               selectedKeys={[selectedCadreFilter]}
-              onChange={(e) => setSelectedCadreFilter(e.target.value || "ALL")}
-              className="bg-slate-50"
+              onChange={(e) => {
+                setSelectedCadreFilter(e.target.value || "ALL");
+                setPage(1);
+              }}
+              className="bg-slate-50 font-semibold"
             >
               {(cadre) => <SelectItem key={cadre.key}>{cadre.label}</SelectItem>}
             </Select>
@@ -290,10 +307,32 @@ export default function RankMasterPage() {
         </CardBody>
       </Card>
 
-      {/* Main Table */}
+      {/* 2. Main Rules Table */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
-          <Table removeWrapper aria-label="Rank Master Table" className="min-w-full">
+          <Table
+            removeWrapper
+            aria-label="Rank Master Table"
+            className="min-w-full"
+            bottomContent={
+              totalPages > 1 ? (
+                <div className="flex w-full justify-between items-center p-3 border-t border-slate-100">
+                  <span className="text-xs text-slate-500">
+                    Showing {(page - 1) * rowsPerPage + 1} to{" "}
+                    {Math.min(page * rowsPerPage, filteredRanks.length)} of {filteredRanks.length}
+                  </span>
+                  <Pagination
+                    isCompact
+                    showControls
+                    color="primary"
+                    page={page}
+                    total={totalPages}
+                    onChange={(p) => setPage(p)}
+                  />
+                </div>
+              ) : null
+            }
+          >
             <TableHeader>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">S.NO</TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">RANK TITLE</TableColumn>
@@ -303,22 +342,22 @@ export default function RankMasterPage() {
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">ACTION</TableColumn>
             </TableHeader>
             <TableBody
-              items={filteredRanks}
-              isLoading={loading}
-              loadingContent={
-                <div className="p-4 space-y-2">
-                  <Skeleton className="h-6 w-full rounded" />
-                  <Skeleton className="h-6 w-full rounded" />
-                  <Skeleton className="h-6 w-full rounded" />
-                </div>
+              items={paginatedRanks}
+              emptyContent={
+                loading ? (
+                  <div className="py-6 flex justify-center items-center gap-2 text-slate-500">
+                    <Spinner size="sm" /> Loading police ranks...
+                  </div>
+                ) : (
+                  "No police ranks match the specified criteria."
+                )
               }
-              emptyContent={!loading ? "No police ranks match the specified criteria." : " "}
             >
               {(item) => {
-                const index = ranks.findIndex((r) => r._id === item._id) + 1;
+                const itemIndex = (page - 1) * rowsPerPage + paginatedRanks.indexOf(item) + 1;
                 return (
                   <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                    <TableCell className="text-xs font-bold text-slate-400">{index}</TableCell>
+                    <TableCell className="text-xs font-bold text-slate-400">{itemIndex}</TableCell>
                     <TableCell className="text-xs font-bold text-slate-900">{item.rankName}</TableCell>
                     <TableCell className="font-mono text-xs font-semibold text-blue-700">{item.shortCode}</TableCell>
                     <TableCell className="text-xs text-slate-600">{item.cadreType}</TableCell>
@@ -357,7 +396,7 @@ export default function RankMasterPage() {
         </CardBody>
       </Card>
 
-      {/* 1. Add Rank Modal */}
+      {/* MODAL 1: Add Rank Modal */}
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
@@ -371,16 +410,18 @@ export default function RankMasterPage() {
                   name="rankName"
                   control={addControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Official Rank Title"
-                      labelPlacement="outside"
-                      placeholder="e.g. Assistant Sub Inspector"
-                      isInvalid={!!addErrors.rankName}
-                      errorMessage={addErrors.rankName?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Official Rank Title <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. Assistant Sub Inspector"
+                        isInvalid={!!addErrors.rankName}
+                        errorMessage={addErrors.rankName?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -388,16 +429,18 @@ export default function RankMasterPage() {
                   name="shortCode"
                   control={addControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Short Acronym / Code"
-                      labelPlacement="outside"
-                      placeholder="e.g. ASI"
-                      isInvalid={!!addErrors.shortCode}
-                      errorMessage={addErrors.shortCode?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Short Acronym / Code <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. ASI"
+                        isInvalid={!!addErrors.shortCode}
+                        errorMessage={addErrors.shortCode?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -405,19 +448,21 @@ export default function RankMasterPage() {
                   name="cadreType"
                   control={addControl}
                   render={({ field }) => (
-                    <Select
-                      size="sm"
-                      label="Cadre Classification"
-                      labelPlacement="outside"
-                      items={CADRE_ITEMS}
-                      selectedKeys={[field.value]}
-                      onChange={(e) => field.onChange(e.target.value)}
-                      isInvalid={!!addErrors.cadreType}
-                      errorMessage={addErrors.cadreType?.message}
-                      isRequired
-                    >
-                      {(cadre) => <SelectItem key={cadre.key}>{cadre.label}</SelectItem>}
-                    </Select>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Cadre Classification <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={CADRE_ITEMS}
+                        selectedKeys={[field.value]}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!addErrors.cadreType}
+                        errorMessage={addErrors.cadreType?.message}
+                      >
+                        {(cadre) => <SelectItem key={cadre.key}>{cadre.label}</SelectItem>}
+                      </Select>
+                    </div>
                   )}
                 />
 
@@ -425,19 +470,21 @@ export default function RankMasterPage() {
                   name="payLevelGrade"
                   control={addControl}
                   render={({ field }) => (
-                    <Select
-                      size="sm"
-                      label="Applicable Pay Level"
-                      labelPlacement="outside"
-                      items={PAY_LEVEL_ITEMS}
-                      selectedKeys={[field.value]}
-                      onChange={(e) => field.onChange(e.target.value)}
-                      isInvalid={!!addErrors.payLevelGrade}
-                      errorMessage={addErrors.payLevelGrade?.message}
-                      isRequired
-                    >
-                      {(pay) => <SelectItem key={pay.key}>{pay.label}</SelectItem>}
-                    </Select>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Applicable Pay Level <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={PAY_LEVEL_ITEMS}
+                        selectedKeys={[field.value]}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!addErrors.payLevelGrade}
+                        errorMessage={addErrors.payLevelGrade?.message}
+                      >
+                        {(pay) => <SelectItem key={pay.key}>{pay.label}</SelectItem>}
+                      </Select>
+                    </div>
                   )}
                 />
               </ModalBody>
@@ -460,7 +507,7 @@ export default function RankMasterPage() {
         </ModalContent>
       </Modal>
 
-      {/* 2. Edit Rank Modal */}
+      {/* MODAL 2: Edit Rank Modal */}
       <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
@@ -474,15 +521,17 @@ export default function RankMasterPage() {
                   name="rankName"
                   control={editControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Rank Title"
-                      labelPlacement="outside"
-                      isInvalid={!!editErrors.rankName}
-                      errorMessage={editErrors.rankName?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Rank Title <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        isInvalid={!!editErrors.rankName}
+                        errorMessage={editErrors.rankName?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -490,15 +539,17 @@ export default function RankMasterPage() {
                   name="shortCode"
                   control={editControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Short Code"
-                      labelPlacement="outside"
-                      isInvalid={!!editErrors.shortCode}
-                      errorMessage={editErrors.shortCode?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Short Code <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        isInvalid={!!editErrors.shortCode}
+                        errorMessage={editErrors.shortCode?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -506,16 +557,21 @@ export default function RankMasterPage() {
                   name="cadreType"
                   control={editControl}
                   render={({ field }) => (
-                    <Select
-                      size="sm"
-                      label="Cadre Classification"
-                      labelPlacement="outside"
-                      items={CADRE_ITEMS}
-                      selectedKeys={[field.value]}
-                      onChange={(e) => field.onChange(e.target.value)}
-                    >
-                      {(cadre) => <SelectItem key={cadre.key}>{cadre.label}</SelectItem>}
-                    </Select>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Cadre Classification <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={CADRE_ITEMS}
+                        selectedKeys={[field.value]}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!editErrors.cadreType}
+                        errorMessage={editErrors.cadreType?.message}
+                      >
+                        {(cadre) => <SelectItem key={cadre.key}>{cadre.label}</SelectItem>}
+                      </Select>
+                    </div>
                   )}
                 />
 
@@ -523,16 +579,21 @@ export default function RankMasterPage() {
                   name="payLevelGrade"
                   control={editControl}
                   render={({ field }) => (
-                    <Select
-                      size="sm"
-                      label="Pay Grade Level"
-                      labelPlacement="outside"
-                      items={PAY_LEVEL_ITEMS}
-                      selectedKeys={[field.value]}
-                      onChange={(e) => field.onChange(e.target.value)}
-                    >
-                      {(pay) => <SelectItem key={pay.key}>{pay.label}</SelectItem>}
-                    </Select>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Pay Grade Level <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={PAY_LEVEL_ITEMS}
+                        selectedKeys={[field.value]}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!editErrors.payLevelGrade}
+                        errorMessage={editErrors.payLevelGrade?.message}
+                      >
+                        {(pay) => <SelectItem key={pay.key}>{pay.label}</SelectItem>}
+                      </Select>
+                    </div>
                   )}
                 />
               </ModalBody>
@@ -555,7 +616,7 @@ export default function RankMasterPage() {
         </ModalContent>
       </Modal>
 
-      {/* 3. Delete Confirmation Modal */}
+      {/* MODAL 3: Delete Confirmation Modal */}
       <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
         <ModalContent>
           {(onClose) => (
@@ -568,7 +629,7 @@ export default function RankMasterPage() {
                 Are you sure you want to remove <b>{rankToDelete?.rankName}</b> ({rankToDelete?.shortCode})?
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button
@@ -576,6 +637,7 @@ export default function RankMasterPage() {
                   radius="sm"
                   className="bg-rose-600 font-semibold text-white hover:bg-rose-700"
                   onClick={handleConfirmDelete}
+                  isLoading={isSubmitting}
                 >
                   Delete Rank
                 </Button>

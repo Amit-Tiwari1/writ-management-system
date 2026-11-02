@@ -25,7 +25,8 @@ import {
 import Link from "next/link";
 import toast from "react-hot-toast";
 
-import { ComplianceAPI, ActiveStayItem } from "@/api/complianceApi";
+import { ComplianceAPI } from "@/api/complianceApi";
+import { ActiveStayItem } from "@/types/compliance.types";
 
 export default function ActiveStaysRosterPage() {
   const { isOpen, onOpen, onOpenChange } = useDisclosure();
@@ -40,6 +41,7 @@ export default function ActiveStaysRosterPage() {
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
 
   const [standingCounsel, setStandingCounsel] = useState("Chief Standing Counsel (HC Allahabad)");
   const [filingDate, setFilingDate] = useState(new Date().toISOString().split("T")[0]);
@@ -96,8 +98,32 @@ export default function ActiveStaysRosterPage() {
     }
   };
 
+  const handleExportStaysPdf = async () => {
+    setIsExporting(true);
+    const toastId = toast.loading("Compiling Certified Active Stays MIS Sheet...");
+    try {
+      const htmlContent = await ComplianceAPI.downloadStaysPdf();
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        toast.dismiss(toastId);
+        toast.error("Please allow popups to download Stays MIS Sheet.");
+        return;
+      }
+      printWindow.document.open();
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      toast.success("Active Stays MIS exported successfully!", { id: toastId });
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      toast.error(err.response?.data?.message || "Failed to export Stays MIS.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
+      {/* 1. Header Information & Metrics Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -109,7 +135,7 @@ export default function ActiveStaysRosterPage() {
                   </Button>
                 </Link>
                 <h1 className="text-base font-bold text-slate-900">5.1 Active Stays Roster</h1>
-                <Chip size="sm" className="bg-rose-500/20 px-1 text-[10px] font-bold text-rose-700">
+                <Chip size="sm" color="danger" variant="solid" className="px-1.5 text-[10px] font-extrabold">
                   {metrics.totalActiveStays} Injunctions Active
                 </Chip>
               </div>
@@ -122,9 +148,10 @@ export default function ActiveStaysRosterPage() {
                 size="sm"
                 variant="bordered"
                 radius="sm"
-                className="border-slate-200 bg-white text-xs font-semibold text-slate-700"
-                startContent={<span className="material-symbols-rounded text-sm">download</span>}
-                onClick={() => toast.success("Exporting certified Active Stays MIS (Excel)...")}
+                className="border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                startContent={<span className="material-symbols-rounded text-sm text-blue-700">picture_as_pdf</span>}
+                isLoading={isExporting}
+                onClick={handleExportStaysPdf}
               >
                 Export Stay MIS
               </Button>
@@ -152,6 +179,7 @@ export default function ActiveStaysRosterPage() {
         </CardBody>
       </Card>
 
+      {/* 2. Main Active Stays Injunctions Table */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
           <Table removeWrapper aria-label="Active stays table" className="min-w-full">
@@ -172,7 +200,7 @@ export default function ActiveStaysRosterPage() {
                 VACATION MOTION STATUS
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                OIC
+                ACCOUNTABLE OIC
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
                 ACTION
@@ -189,7 +217,7 @@ export default function ActiveStaysRosterPage() {
               }
               emptyContent={!loading ? "No active judicial stays in force. All examination/recruitment heads clear." : " "}
             >
-              {(item) => (
+              {(item: ActiveStayItem) => (
                 <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
                   <TableCell>
                     <Link
@@ -260,6 +288,7 @@ export default function ActiveStaysRosterPage() {
         </CardBody>
       </Card>
 
+      {/* 3. Statutory Vacation Application Modal (Article 226(3)) */}
       <Modal isOpen={isOpen} onOpenChange={onOpenChange} placement="top" size="2xl">
         <ModalContent>
           {(onClose) => (

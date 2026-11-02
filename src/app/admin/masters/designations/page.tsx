@@ -21,21 +21,20 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
-  Skeleton,
+  Pagination,
+  Spinner,
 } from "@nextui-org/react";
 import Link from "next/link";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
-import { MastersAPI } from "@/api/mastersApi";
 
-interface DesignationRecord {
-  _id: string;
-  title: string;
-  authorityLevel: string;
-  defaultRole: string;
-  canSignPWC?: boolean;
-  canForwardFiles?: boolean;
-  createdAt?: string;
-}
+import { MastersAPI } from "@/api/mastersApi";
+import { designationSchema } from "@/schemas/masterSchema";
+import { IDesignationItem } from "@/types/master.types";
+import { z } from "zod";
+
+type DesignationFormValues = z.infer<typeof designationSchema>;
 
 const AUTHORITY_TIERS = [
   { key: "Apex Board Authority", label: "Apex Board Authority" },
@@ -68,45 +67,76 @@ export default function DesignationMasterPage() {
   const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
 
-  const [designations, setDesignations] = useState<DesignationRecord[]>([]);
+  const [designations, setDesignations] = useState<IDesignationItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTierFilter, setSelectedTierFilter] = useState("ALL");
 
-  const [formData, setFormData] = useState({
-    title: "",
-    authorityLevel: "Legal Desk Operator",
-    defaultRole: "Noting / Filing Desk",
-    canSignPWC: false,
-    canForwardFiles: true,
+  const [page, setPage] = useState(1);
+  const rowsPerPage = 8;
+
+  const [editingItem, setEditingItem] = useState<IDesignationItem | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<IDesignationItem | null>(null);
+
+  // 1. Add Form
+  const {
+    control: addControl,
+    handleSubmit: handleAddSubmit,
+    reset: resetAddForm,
+    formState: { errors: addErrors },
+  } = useForm<DesignationFormValues>({
+    resolver: zodResolver(designationSchema) as any,
+    defaultValues: {
+      title: "",
+      authorityLevel: "Legal Desk Operator",
+      defaultRole: "Noting / Filing Desk",
+      canSignPWC: false,
+      canForwardFiles: true,
+    },
   });
 
-  const [editingItem, setEditingItem] = useState<DesignationRecord | null>(null);
-  const [itemToDelete, setItemToDelete] = useState<DesignationRecord | null>(null);
+  // 2. Edit Form
+  const {
+    control: editControl,
+    handleSubmit: handleEditSubmit,
+    reset: resetEditForm,
+    formState: { errors: editErrors },
+  } = useForm<DesignationFormValues>({
+    resolver: zodResolver(designationSchema) as any,
+    defaultValues: {
+      title: "",
+      authorityLevel: "Legal Desk Operator",
+      defaultRole: "Noting / Filing Desk",
+      canSignPWC: false,
+      canForwardFiles: true,
+    },
+  });
 
   const fetchDesignations = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await MastersAPI.getDesignations();
+      const res = await MastersAPI.getDesignations({
+        limit: 100,
+        authorityLevel: selectedTierFilter !== "ALL" ? selectedTierFilter : undefined,
+      });
       if (res?.success) {
         setDesignations(res.data || []);
       }
     } catch (err: any) {
-      console.error("[DesignationMaster] Error fetching:", err);
       toast.error(err.response?.data?.message || "Failed to load designations");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedTierFilter]);
 
   useEffect(() => {
     fetchDesignations();
   }, [fetchDesignations]);
 
   const handleOpenAdd = () => {
-    setFormData({
+    resetAddForm({
       title: "",
       authorityLevel: "Legal Desk Operator",
       defaultRole: "Noting / Filing Desk",
@@ -116,19 +146,14 @@ export default function DesignationMasterPage() {
     onAddOpen();
   };
 
-  const handleAdd = async () => {
-    if (!formData.title.trim()) {
-      toast.error("Designation title is required!");
-      return;
-    }
-
+  const onAddDesignation = async (values: DesignationFormValues) => {
     setIsSubmitting(true);
     try {
       const payload = {
-        title: formData.title.trim(),
-        authorityLevel: formData.authorityLevel,
-        defaultRole: formData.defaultRole,
-        canSignPWC: formData.authorityLevel.includes("Head") || formData.authorityLevel.includes("Apex"),
+        title: values.title.trim(),
+        authorityLevel: values.authorityLevel,
+        defaultRole: values.defaultRole || "Officer-in-Charge (OIC)",
+        canSignPWC: values.authorityLevel.includes("Head") || values.authorityLevel.includes("Apex"),
         canForwardFiles: true,
       };
 
@@ -145,32 +170,61 @@ export default function DesignationMasterPage() {
     }
   };
 
-  const handleOpenEdit = (item: DesignationRecord) => {
-    setEditingItem({ ...item });
+  const handleOpenEdit = (item: IDesignationItem) => {
+    setEditingItem(item);
+    resetEditForm({
+      title: item.title,
+      authorityLevel: item.authorityLevel,
+      defaultRole: item.defaultRole || "Officer-in-Charge (OIC)",
+      canSignPWC: Boolean(item.canSignPWC),
+      canForwardFiles: item.canForwardFiles ?? true,
+    });
     onEditOpen();
   };
 
-  const handleSaveEdit = async () => {
-    if (!editingItem || !editingItem.title.trim()) return;
-    setDesignations((prev) =>
-      prev.map((d) => (d._id === editingItem._id ? { ...editingItem } : d))
-    );
-    toast.success(`Updated designation: ${editingItem.title}`);
-    onEditOpenChange();
-    setEditingItem(null);
+  const onSaveEdit = async (values: DesignationFormValues) => {
+    if (!editingItem) return;
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        _id: editingItem._id,
+        title: values.title.trim(),
+        authorityLevel: values.authorityLevel,
+        defaultRole: values.defaultRole || "Officer-in-Charge (OIC)",
+        canSignPWC: values.authorityLevel.includes("Head") || values.authorityLevel.includes("Apex"),
+        canForwardFiles: values.canForwardFiles ?? true,
+      };
+
+      await MastersAPI.createDesignation(payload);
+      toast.success(`Updated designation: ${payload.title}`);
+      onEditOpenChange();
+      setEditingItem(null);
+      fetchDesignations();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to update designation");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleOpenDelete = (item: DesignationRecord) => {
+  const handleOpenDelete = (item: IDesignationItem) => {
     setItemToDelete(item);
     onDeleteOpen();
   };
 
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
-    setDesignations((prev) => prev.filter((d) => d._id !== itemToDelete._id));
-    toast.success(`Designation "${itemToDelete.title}" removed.`);
-    onDeleteOpenChange();
-    setItemToDelete(null);
+    setIsSubmitting(true);
+    try {
+      setDesignations((prev) => prev.filter((d) => d._id !== itemToDelete._id));
+      toast.success(`Designation "${itemToDelete.title}" removed.`);
+      onDeleteOpenChange();
+      setItemToDelete(null);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to delete designation");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const filteredDesignations = useMemo(() => {
@@ -178,7 +232,7 @@ export default function DesignationMasterPage() {
       const matchesSearch =
         item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.authorityLevel?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.defaultRole?.toLowerCase().includes(searchQuery.toLowerCase());
+        (item.defaultRole && item.defaultRole.toLowerCase().includes(searchQuery.toLowerCase()));
 
       const matchesTier =
         selectedTierFilter === "ALL" || item.authorityLevel === selectedTierFilter;
@@ -187,9 +241,15 @@ export default function DesignationMasterPage() {
     });
   }, [designations, searchQuery, selectedTierFilter]);
 
+  const totalPages = Math.ceil(filteredDesignations.length / rowsPerPage) || 1;
+  const paginatedDesignations = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    return filteredDesignations.slice(start, start + rowsPerPage);
+  }, [filteredDesignations, page, rowsPerPage]);
+
   return (
     <div className="space-y-4">
-      {/* Header Bar */}
+      {/* 1. Header Information Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -201,7 +261,7 @@ export default function DesignationMasterPage() {
                   </Button>
                 </Link>
                 <h1 className="text-base font-bold text-slate-900">
-                  6.4 Designation & Administrative Roles Master
+                  7.4 Designation & Administrative Roles Master
                 </h1>
                 <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
                   {designations.length} Designations Mapped
@@ -229,7 +289,10 @@ export default function DesignationMasterPage() {
               radius="sm"
               placeholder="Search designation title or role..."
               value={searchQuery}
-              onValueChange={setSearchQuery}
+              onValueChange={(val) => {
+                setSearchQuery(val);
+                setPage(1);
+              }}
               startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
               className="bg-slate-50 sm:col-span-2"
             />
@@ -240,8 +303,11 @@ export default function DesignationMasterPage() {
               placeholder="Filter by Authority Tier"
               items={AUTHORITY_FILTER_ITEMS}
               selectedKeys={[selectedTierFilter]}
-              onChange={(e) => setSelectedTierFilter(e.target.value || "ALL")}
-              className="bg-slate-50"
+              onChange={(e) => {
+                setSelectedTierFilter(e.target.value || "ALL");
+                setPage(1);
+              }}
+              className="bg-slate-50 font-semibold"
             >
               {(tier) => <SelectItem key={tier.key}>{tier.label}</SelectItem>}
             </Select>
@@ -249,10 +315,32 @@ export default function DesignationMasterPage() {
         </CardBody>
       </Card>
 
-      {/* Main Table */}
+      {/* 2. Main Rules Table */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
-          <Table removeWrapper aria-label="Designation Master Table" className="min-w-full">
+          <Table
+            removeWrapper
+            aria-label="Designation Master Table"
+            className="min-w-full"
+            bottomContent={
+              totalPages > 1 ? (
+                <div className="flex w-full justify-between items-center p-3 border-t border-slate-100">
+                  <span className="text-xs text-slate-500">
+                    Showing {(page - 1) * rowsPerPage + 1} to{" "}
+                    {Math.min(page * rowsPerPage, filteredDesignations.length)} of {filteredDesignations.length}
+                  </span>
+                  <Pagination
+                    isCompact
+                    showControls
+                    color="primary"
+                    page={page}
+                    total={totalPages}
+                    onChange={(p) => setPage(p)}
+                  />
+                </div>
+              ) : null
+            }
+          >
             <TableHeader>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 S.NO
@@ -267,32 +355,45 @@ export default function DesignationMasterPage() {
                 DEFAULT CASE ROLE
               </TableColumn>
               <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
+                PWC SIGNING
+              </TableColumn>
+              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
                 ACTION
               </TableColumn>
             </TableHeader>
             <TableBody
-              items={filteredDesignations}
-              isLoading={loading}
-              loadingContent={
-                <div className="p-4 space-y-2">
-                  <Skeleton className="h-6 w-full rounded" />
-                  <Skeleton className="h-6 w-full rounded" />
-                  <Skeleton className="h-6 w-full rounded" />
-                </div>
+              items={paginatedDesignations}
+              emptyContent={
+                loading ? (
+                  <div className="py-6 flex justify-center items-center gap-2 text-slate-500">
+                    <Spinner size="sm" /> Loading designations...
+                  </div>
+                ) : (
+                  "No administrative designations match the specified criteria."
+                )
               }
-              emptyContent={!loading ? "No administrative designations match the specified criteria." : " "}
             >
               {(item) => {
-                const index = designations.findIndex((d) => d._id === item._id) + 1;
+                const itemIndex = (page - 1) * rowsPerPage + paginatedDesignations.indexOf(item) + 1;
                 return (
                   <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                    <TableCell className="text-xs font-bold text-slate-400">{index}</TableCell>
+                    <TableCell className="text-xs font-bold text-slate-400">{itemIndex}</TableCell>
                     <TableCell className="text-xs font-bold text-slate-900">{item.title}</TableCell>
                     <TableCell className="text-xs text-slate-700 font-medium">
                       {item.authorityLevel}
                     </TableCell>
                     <TableCell className="text-xs text-blue-700 font-semibold">
-                      {item.defaultRole}
+                      {item.defaultRole || "--"}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Chip
+                        size="sm"
+                        variant="flat"
+                        color={item.canSignPWC ? "success" : "default"}
+                        className="text-[10px] font-bold"
+                      >
+                        {item.canSignPWC ? "Authorized" : "Not Authorized"}
+                      </Chip>
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-1">
@@ -324,135 +425,190 @@ export default function DesignationMasterPage() {
         </CardBody>
       </Card>
 
-      {/* 1. Add Designation Modal */}
+      {/* MODAL 1: Add Designation Modal */}
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
-            <>
+            <form onSubmit={handleAddSubmit(onAddDesignation)}>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span className="material-symbols-rounded text-blue-700">badge</span>
                 Add Official Designation
               </ModalHeader>
               <ModalBody className="space-y-3">
-                <Input
-                  size="sm"
-                  label="Official Designation Title"
-                  labelPlacement="outside"
-                  placeholder="e.g. Chief Law Officer (CLO)"
-                  value={formData.title}
-                  onValueChange={(v) => setFormData({ ...formData, title: v })}
-                  isRequired
+                <Controller
+                  name="title"
+                  control={addControl}
+                  render={({ field }) => (
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Official Designation Title <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. Chief Law Officer (CLO)"
+                        isInvalid={!!addErrors.title}
+                        errorMessage={addErrors.title?.message}
+                      />
+                    </div>
+                  )}
                 />
-                <Select
-                  size="sm"
-                  label="Authority Level / Signing Tier"
-                  labelPlacement="outside"
-                  items={AUTHORITY_TIERS}
-                  selectedKeys={[formData.authorityLevel]}
-                  onChange={(e) => setFormData({ ...formData, authorityLevel: e.target.value })}
-                  isRequired
-                >
-                  {(tier) => <SelectItem key={tier.key}>{tier.label}</SelectItem>}
-                </Select>
-                <Select
-                  size="sm"
-                  label="Default Case Management Role"
-                  labelPlacement="outside"
-                  items={DEFAULT_ROLES}
-                  selectedKeys={[formData.defaultRole]}
-                  onChange={(e) => setFormData({ ...formData, defaultRole: e.target.value })}
-                  isRequired
-                >
-                  {(role) => <SelectItem key={role.key}>{role.label}</SelectItem>}
-                </Select>
+
+                <Controller
+                  name="authorityLevel"
+                  control={addControl}
+                  render={({ field }) => (
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Authority Level / Signing Tier <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={AUTHORITY_TIERS}
+                        selectedKeys={field.value ? [field.value] : []}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!addErrors.authorityLevel}
+                        errorMessage={addErrors.authorityLevel?.message}
+                      >
+                        {(tier) => <SelectItem key={tier.key}>{tier.label}</SelectItem>}
+                      </Select>
+                    </div>
+                  )}
+                />
+
+                <Controller
+                  name="defaultRole"
+                  control={addControl}
+                  render={({ field }) => (
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Default Case Management Role <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={DEFAULT_ROLES}
+                        selectedKeys={field.value ? [field.value] : ["Noting / Filing Desk"]}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!addErrors.defaultRole}
+                        errorMessage={addErrors.defaultRole?.message}
+                      >
+                        {(role) => <SelectItem key={role.key}>{role.label}</SelectItem>}
+                      </Select>
+                    </div>
+                  )}
+                />
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
+                  type="submit"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
                   isLoading={isSubmitting}
-                  onClick={handleAdd}
                 >
                   Save Designation
                 </Button>
               </ModalFooter>
-            </>
+            </form>
           )}
         </ModalContent>
       </Modal>
 
-      {/* 2. Edit Designation Modal */}
+      {/* MODAL 2: Edit Designation Modal */}
       <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
-            <>
+            <form onSubmit={handleEditSubmit(onSaveEdit)}>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <span className="material-symbols-rounded text-blue-700">edit</span>
                 Edit Designation: {editingItem?.title}
               </ModalHeader>
               <ModalBody className="space-y-3">
-                <Input
-                  size="sm"
-                  label="Designation Title"
-                  labelPlacement="outside"
-                  value={editingItem?.title || ""}
-                  onValueChange={(v) =>
-                    setEditingItem(editingItem ? { ...editingItem, title: v } : null)
-                  }
-                  isRequired
+                <Controller
+                  name="title"
+                  control={editControl}
+                  render={({ field }) => (
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Designation Title <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        isInvalid={!!editErrors.title}
+                        errorMessage={editErrors.title?.message}
+                      />
+                    </div>
+                  )}
                 />
-                <Select
-                  size="sm"
-                  label="Authority Level"
-                  labelPlacement="outside"
-                  items={AUTHORITY_TIERS}
-                  selectedKeys={editingItem ? [editingItem.authorityLevel] : ["Legal Desk Operator"]}
-                  onChange={(e) =>
-                    setEditingItem(
-                      editingItem ? { ...editingItem, authorityLevel: e.target.value } : null
-                    )
-                  }
-                >
-                  {(tier) => <SelectItem key={tier.key}>{tier.label}</SelectItem>}
-                </Select>
-                <Select
-                  size="sm"
-                  label="Default Case Role"
-                  labelPlacement="outside"
-                  items={DEFAULT_ROLES}
-                  selectedKeys={editingItem ? [editingItem.defaultRole] : ["Noting / Filing Desk"]}
-                  onChange={(e) =>
-                    setEditingItem(
-                      editingItem ? { ...editingItem, defaultRole: e.target.value } : null
-                    )
-                  }
-                >
-                  {(role) => <SelectItem key={role.key}>{role.label}</SelectItem>}
-                </Select>
+
+                <Controller
+                  name="authorityLevel"
+                  control={editControl}
+                  render={({ field }) => (
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Authority Level <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={AUTHORITY_TIERS}
+                        selectedKeys={field.value ? [field.value] : []}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!editErrors.authorityLevel}
+                        errorMessage={editErrors.authorityLevel?.message}
+                      >
+                        {(tier) => <SelectItem key={tier.key}>{tier.label}</SelectItem>}
+                      </Select>
+                    </div>
+                  )}
+                />
+
+                <Controller
+                  name="defaultRole"
+                  control={editControl}
+                  render={({ field }) => (
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Default Case Role <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={DEFAULT_ROLES}
+                        selectedKeys={field.value ? [field.value] : ["Noting / Filing Desk"]}
+                        onChange={(e) => field.onChange(e.target.value)}
+                        isInvalid={!!editErrors.defaultRole}
+                        errorMessage={editErrors.defaultRole?.message}
+                      >
+                        {(role) => <SelectItem key={role.key}>{role.label}</SelectItem>}
+                      </Select>
+                    </div>
+                  )}
+                />
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
+                  type="submit"
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  onClick={handleSaveEdit}
+                  isLoading={isSubmitting}
                 >
                   Save Changes
                 </Button>
               </ModalFooter>
-            </>
+            </form>
           )}
         </ModalContent>
       </Modal>
 
-      {/* 3. Delete Confirmation Modal */}
+      {/* MODAL 3: Delete Confirmation Modal */}
       <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
         <ModalContent>
           {(onClose) => (
@@ -465,7 +621,7 @@ export default function DesignationMasterPage() {
                 Are you sure you want to remove <b>{itemToDelete?.title}</b>? Any officer profile assigned to this designation will need reconfiguration.
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button
@@ -473,6 +629,7 @@ export default function DesignationMasterPage() {
                   radius="sm"
                   className="bg-rose-600 font-semibold text-white hover:bg-rose-700"
                   onClick={handleConfirmDelete}
+                  isLoading={isSubmitting}
                 >
                   Delete Designation
                 </Button>

@@ -19,7 +19,8 @@ import {
 import Link from "next/link";
 import toast from "react-hot-toast";
 
-import { RbacAPI, RoleMetricItem, PermissionMatrixItem } from "@/api/rbacApi";
+import { RbacAPI } from "@/api/rbacApi";
+import { RoleMetricItem, PermissionMatrixItem } from "@/types/rbac.types";
 
 export default function DynamicRBACPage() {
   const { isOpen, onOpen, onOpenChange } = useDisclosure();
@@ -33,6 +34,7 @@ export default function DynamicRBACPage() {
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isCreatingRole, setIsCreatingRole] = useState<boolean>(false);
 
+  const [roleSearchQuery, setRoleSearchQuery] = useState("");
   const [newRoleName, setNewRoleName] = useState("");
   const [newRoleCode, setNewRoleCode] = useState("");
   const [newRoleDesc, setNewRoleDesc] = useState("");
@@ -85,6 +87,17 @@ export default function DynamicRBACPage() {
     return roles.find((r) => r._id === selectedRoleId);
   }, [roles, selectedRoleId]);
 
+  const filteredRoles = useMemo(() => {
+    if (!roleSearchQuery.trim()) return roles;
+    const q = roleSearchQuery.toLowerCase().trim();
+    return roles.filter(
+      (r) =>
+        r.roleName.toLowerCase().includes(q) ||
+        r.roleCode.toLowerCase().includes(q) ||
+        r.description?.toLowerCase().includes(q)
+    );
+  }, [roles, roleSearchQuery]);
+
   const handleToggleAction = (
     index: number,
     actionKey: "canView" | "canCreate" | "canEdit" | "canDelete" | "canSign" | "canExport" | "canDownload"
@@ -103,7 +116,7 @@ export default function DynamicRBACPage() {
     setPermissionsMatrix((prev) => {
       const updated = [...prev];
       const row = updated[index];
-      const nextVal = !(row.canView && row.canCreate && row.canEdit);
+      const nextVal = !(row.canView && row.canCreate && row.canEdit && row.canSign);
       updated[index] = {
         ...row,
         canView: nextVal,
@@ -115,6 +128,19 @@ export default function DynamicRBACPage() {
         canDownload: nextVal,
       };
       return updated;
+    });
+  };
+
+  const handleToggleColumnAll = (
+    actionKey: "canView" | "canCreate" | "canEdit" | "canDelete" | "canSign" | "canExport" | "canDownload"
+  ) => {
+    setPermissionsMatrix((prev) => {
+      const allActive = prev.every((row) => row[actionKey]);
+      const nextVal = !allActive;
+      return prev.map((row) => ({
+        ...row,
+        [actionKey]: nextVal,
+      }));
     });
   };
 
@@ -184,12 +210,12 @@ export default function DynamicRBACPage() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <Link href="/admin/cases">
+                <Link href="/admin/masters">
                   <Button isIconOnly size="sm" variant="light" className="text-slate-500">
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
                 </Link>
-                <h1 className="text-base font-bold text-slate-900">7.2 Dynamic RBAC Role &amp; Permission Matrix</h1>
+                <h1 className="text-base font-bold text-slate-900">8.2 Dynamic RBAC Role &amp; Permission Matrix</h1>
                 <Chip size="sm" className="bg-emerald-500/20 px-1 text-[10px] font-bold text-emerald-800">
                   Granular Menu Security
                 </Chip>
@@ -215,25 +241,37 @@ export default function DynamicRBACPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         {/* Roles List (4 cols) */}
         <Card shadow="none" className="border border-slate-200/80 bg-white lg:col-span-4">
-          <div className="border-b border-slate-100 p-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Configured Roles ({roles.length})
-            </h3>
+          <div className="border-b border-slate-100 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Configured Roles ({roles.length})
+              </h3>
+              <span className="text-[11px] text-slate-400">Institutional Cadres</span>
+            </div>
+            <Input
+              size="sm"
+              radius="sm"
+              placeholder="Search roles or codes..."
+              value={roleSearchQuery}
+              onValueChange={setRoleSearchQuery}
+              startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
+              className="bg-slate-50"
+            />
           </div>
-          <CardBody className="p-2 space-y-1">
+          <CardBody className="p-2 space-y-1 max-h-[680px] overflow-y-auto">
             {loadingRoles ? (
               <div className="space-y-2 p-2">
                 <Skeleton className="h-12 w-full rounded-lg" />
                 <Skeleton className="h-12 w-full rounded-lg" />
                 <Skeleton className="h-12 w-full rounded-lg" />
               </div>
-            ) : roles.length > 0 ? (
-              roles.map((r) => (
+            ) : filteredRoles.length > 0 ? (
+              filteredRoles.map((r) => (
                 <div
                   key={r._id}
                   onClick={() => setSelectedRoleId(r._id)}
                   className={`cursor-pointer rounded-lg p-3 transition-colors ${
-                    selectedRoleId === r._id ? "bg-blue-50/80 border border-blue-200" : "hover:bg-slate-50"
+                    selectedRoleId === r._id ? "bg-blue-50/80 border border-blue-200 shadow-sm" : "hover:bg-slate-50 border border-transparent"
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -249,7 +287,7 @@ export default function DynamicRBACPage() {
                 </div>
               ))
             ) : (
-              <p className="text-xs text-slate-400 p-4">No roles configured.</p>
+              <p className="text-xs text-slate-400 p-4">No matching roles found.</p>
             )}
           </CardBody>
         </Card>
@@ -261,7 +299,7 @@ export default function DynamicRBACPage() {
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                 Action Capabilities for: <span className="text-blue-950 font-bold">{activeRole?.roleName}</span>
               </h3>
-              <p className="text-[11px] text-slate-400">Toggle actions granted to this role</p>
+              <p className="text-[11px] text-slate-400">Toggle actions granted to this role. Click on module name to toggle all actions for row.</p>
             </div>
             <Button
               size="sm"
@@ -287,12 +325,27 @@ export default function DynamicRBACPage() {
                   <thead className="border-b border-slate-100 text-[10px] font-bold uppercase text-slate-400 bg-slate-50/50">
                     <tr>
                       <th className="p-3">SYSTEM MODULE &amp; MENUS</th>
-                      <th className="p-3 text-center">VIEW</th>
-                      <th className="p-3 text-center">CREATE</th>
-                      <th className="p-3 text-center">EDIT</th>
-                      <th className="p-3 text-center">DELETE</th>
-                      <th className="p-3 text-center">SIGN</th>
-                      <th className="p-3 text-center">EXPORT</th>
+                      <th className="p-3 text-center cursor-pointer hover:text-blue-700" onClick={() => handleToggleColumnAll("canView")}>
+                        VIEW ▾
+                      </th>
+                      <th className="p-3 text-center cursor-pointer hover:text-blue-700" onClick={() => handleToggleColumnAll("canCreate")}>
+                        CREATE ▾
+                      </th>
+                      <th className="p-3 text-center cursor-pointer hover:text-blue-700" onClick={() => handleToggleColumnAll("canEdit")}>
+                        EDIT ▾
+                      </th>
+                      <th className="p-3 text-center cursor-pointer hover:text-blue-700" onClick={() => handleToggleColumnAll("canDelete")}>
+                        DELETE ▾
+                      </th>
+                      <th className="p-3 text-center cursor-pointer hover:text-blue-700" onClick={() => handleToggleColumnAll("canSign")}>
+                        SIGN ▾
+                      </th>
+                      <th className="p-3 text-center cursor-pointer hover:text-blue-700" onClick={() => handleToggleColumnAll("canExport")}>
+                        EXPORT ▾
+                      </th>
+                      <th className="p-3 text-center cursor-pointer hover:text-blue-700" onClick={() => handleToggleColumnAll("canDownload")}>
+                        DOWNLOAD ▾
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -302,6 +355,7 @@ export default function DynamicRBACPage() {
                           <p
                             className="font-bold text-slate-900 cursor-pointer hover:underline"
                             onClick={() => handleToggleRowAll(idx)}
+                            title="Click to toggle entire row"
                           >
                             {p.moduleTitle}
                           </p>
@@ -350,6 +404,13 @@ export default function DynamicRBACPage() {
                           <Checkbox
                             isSelected={p.canExport}
                             onValueChange={() => handleToggleAction(idx, "canExport")}
+                            size="sm"
+                          />
+                        </td>
+                        <td className="p-3 text-center">
+                          <Checkbox
+                            isSelected={p.canDownload}
+                            onValueChange={() => handleToggleAction(idx, "canDownload")}
                             size="sm"
                           />
                         </td>

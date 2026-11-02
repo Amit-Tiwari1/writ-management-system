@@ -39,7 +39,18 @@ type FolderCategoryKey =
   | "04_orders"
   | "05_compliance_proofs";
 
-const FOLDER_CATEGORIES: Array<{ key: FolderCategoryKey; label: string; icon: string }> = [
+interface FolderCategoryOption {
+  key: FolderCategoryKey;
+  label: string;
+  icon: string;
+}
+
+interface CaseSelectOption {
+  key: string;
+  label: string;
+}
+
+const FOLDER_CATEGORIES: FolderCategoryOption[] = [
   { key: "01_petitions", label: "01 Petitions & Annexures", icon: "description" },
   { key: "02_notings", label: "02 Internal Notings & PWC", icon: "edit_note" },
   { key: "03_counter_affidavits", label: "03 Counter Affidavits Filed", icon: "verified" },
@@ -70,7 +81,6 @@ function DocumentDMSContent() {
     "05_compliance_proofs": [],
   });
   const [loadingDocs, setLoadingDocs] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>("");
 
   const [previewDoc, setPreviewDoc] = useState<ICaseDocumentItem | null>(null);
 
@@ -86,7 +96,7 @@ function DocumentDMSContent() {
     async function loadCases() {
       setLoadingCases(true);
       try {
-        const res = await CasesAPI.getCases({ limit: 100 });
+        const res = await CasesAPI.getCases({ limit: 150 });
         if (res?.success && Array.isArray(res.data)) {
           setCasesList(res.data);
           if (res.data.length > 0) {
@@ -135,24 +145,16 @@ function DocumentDMSContent() {
     return casesList.find((c) => c._id === selectedCaseId);
   }, [casesList, selectedCaseId]);
 
-  const caseSelectItems = useMemo(() => {
+  const caseSelectItems: CaseSelectOption[] = useMemo(() => {
     return casesList.map((c) => ({
       key: c._id,
-      label: `${c.fileNo} · ${c.writNumber || "Notice"} — ${c.leadPetitioner}`,
+      label: `${c.fileNo} · ${c.writNumber || c.noticeNumber || "Advance Notice"} — ${c.leadPetitioner}`,
     }));
   }, [casesList]);
 
   const currentFiles = useMemo(() => {
-    const list = foldersData[activeFolder] || [];
-    if (!searchQuery.trim()) return list;
-    const q = searchQuery.toLowerCase().trim();
-    return list.filter(
-      (f) =>
-        f.fileName.toLowerCase().includes(q) ||
-        f.originalName.toLowerCase().includes(q) ||
-        (f.ocrTextContent && f.ocrTextContent.toLowerCase().includes(q))
-    );
-  }, [foldersData, activeFolder, searchQuery]);
+    return foldersData[activeFolder] || [];
+  }, [foldersData, activeFolder]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -220,14 +222,9 @@ function DocumentDMSContent() {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
   };
 
-  const getPdfUrl = (url?: string) => {
-    if (!url) return "";
-    return url;
-  };
-
   return (
     <div className="space-y-4">
-      {/* 1. Header Bar */}
+      {/* 1. Header Bar with Full-Width Case Dropdown */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -239,13 +236,10 @@ function DocumentDMSContent() {
                   </Button>
                 </Link>
                 <h1 className="text-base font-bold text-slate-900">3.0 Legal Document Repository (Case DMS)</h1>
-                <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
-                  MinIO / S3 Storage
-                </Chip>
               </div>
               <p className="mt-1 text-xs text-slate-500 ml-9">
                 Viewing Digital Dossier for: <b className="text-slate-900">{activeCase?.fileNo || "--"}</b> ·{" "}
-                <span className="text-blue-700 font-semibold">{activeCase?.writNumber || "Advance Notice"}</span> ·{" "}
+                <span className="text-blue-700 font-semibold">{activeCase?.writNumber || activeCase?.noticeNumber || "Advance Notice"}</span> ·{" "}
                 {activeCase?.court || "--"}
               </p>
             </div>
@@ -274,40 +268,29 @@ function DocumentDMSContent() {
             </div>
           </div>
 
-          {/* Writ Selector Bar & Full-Text OCR Search */}
-          <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
+          {/* Full-Width Case Matter Selector (OCR Input Box Removed) */}
+          <div className="mt-4 border-t border-slate-100 pt-3">
             <Select
               size="sm"
               radius="sm"
-              label="Select Case Matter E-File"
+              label="Select Case Matter E-File Docket"
               labelPlacement="outside"
+              placeholder="Search or pick writ docket..."
               items={caseSelectItems}
               selectedKeys={selectedCaseId ? [selectedCaseId] : []}
               onChange={(e) => setSelectedCaseId(e.target.value)}
               isLoading={loadingCases}
-              className="bg-slate-50 font-semibold"
+              className="bg-slate-50 font-semibold w-full"
             >
-              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+              {(item: CaseSelectOption) => <SelectItem key={item.key}>{item.label}</SelectItem>}
             </Select>
-
-            <Input
-              size="sm"
-              radius="sm"
-              label="OCR Full-Text Search in Attached PDFs"
-              labelPlacement="outside"
-              placeholder="Search words inside scanned court orders & petitions..."
-              value={searchQuery}
-              onValueChange={setSearchQuery}
-              startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
-              className="bg-slate-50 sm:col-span-2"
-            />
           </div>
         </CardBody>
       </Card>
 
       {/* 2. 5-Folder Directory Tabs */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-        {FOLDER_CATEGORIES.map((f) => {
+        {FOLDER_CATEGORIES.map((f: FolderCategoryOption) => {
           const count = foldersData[f.key]?.length || 0;
           const isSelected = activeFolder === f.key;
           return (
@@ -343,7 +326,6 @@ function DocumentDMSContent() {
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
                 Directory: {FOLDER_CATEGORIES.find((c) => c.key === activeFolder)?.label}
               </h3>
-              <p className="text-[11px] text-slate-400">Tamper-proof encrypted S3 storage ledger</p>
             </div>
             <span className="font-mono text-xs text-slate-400">{currentFiles.length} items</span>
           </div>
@@ -452,7 +434,7 @@ function DocumentDMSContent() {
           </CardBody>
         </Card>
 
-        {/* Right: High-Resolution Viewer & Annotator (5 Cols) */}
+        {/* Right: In-App Document Canvas & Annotator (5 Cols) */}
         <Card shadow="none" className="border border-slate-200/80 bg-white lg:col-span-5">
           <div className="flex items-center justify-between border-b border-slate-100 p-4">
             <div>
@@ -471,7 +453,6 @@ function DocumentDMSContent() {
           <CardBody className="p-4 space-y-3">
             {previewDoc ? (
               <>
-                {/* Metadata Bar */}
                 <div className="rounded-lg bg-slate-50 p-3 text-xs space-y-1 border border-slate-200/60">
                   <div className="flex justify-between text-slate-500">
                     <span>Folder Tier:</span>
@@ -489,7 +470,6 @@ function DocumentDMSContent() {
                   </div>
                 </div>
 
-                {/* Document Canvas Preview */}
                 <div className="flex h-[360px] flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-100/50 p-6 text-center">
                   <span className="material-symbols-rounded text-5xl text-rose-500">picture_as_pdf</span>
                   <p className="mt-2 text-xs font-bold text-slate-800 truncate max-w-[280px]">
@@ -550,7 +530,7 @@ function DocumentDMSContent() {
                   onChange={(e) => setUploadFolder(e.target.value as FolderCategoryKey)}
                   isRequired
                 >
-                  {(c) => <SelectItem key={c.key}>{c.label}</SelectItem>}
+                  {(c: FolderCategoryOption) => <SelectItem key={c.key}>{c.label}</SelectItem>}
                 </Select>
 
                 <div
@@ -596,6 +576,7 @@ function DocumentDMSContent() {
         </ModalContent>
       </Modal>
 
+      {/* 2. Full-Screen Google Docs / Cloud Viewer Modal */}
       <Modal isOpen={isFullScreenOpen} onOpenChange={onFullScreenOpenChange} placement="center" size="5xl">
         <ModalContent className="max-h-[92vh]">
           {(onClose) => {
@@ -644,7 +625,6 @@ function DocumentDMSContent() {
                 <ModalBody className="p-0 overflow-hidden bg-slate-900 flex items-center justify-center min-h-[580px]">
                   {pdfSrc ? (
                     <div className="w-full h-[620px] relative">
-                      {/* Dual Layer: Google Docs Viewer iframe for cloud-hosted PDFs with direct fallback */}
                       <iframe
                         src={viewerUrl}
                         title={previewDoc?.fileName || "PDF Viewer"}
@@ -692,7 +672,7 @@ function DocumentDMSContent() {
                   labelPlacement="outside"
                   type="number"
                   value={annotationPage.toString()}
-                  onChange={(e) => setAnnotationPage(parseInt(e.target.value) || 1)}
+                  onChange={(e) => setAnnotationPage(parseInt(e.target.value, 10) || 1)}
                   isRequired
                 />
 

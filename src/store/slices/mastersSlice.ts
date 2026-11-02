@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk, PayloadAction } from "@reduxjs/toolkit";
-import { MastersAPI, IntakeDropdownBundle } from "../../api/mastersApi";
+import { MastersAPI } from "../../api/mastersApi";
+import { IntakeDropdownBundle } from "../../types/master.types";
 
 interface MastersState {
   dropdowns: IntakeDropdownBundle | null;

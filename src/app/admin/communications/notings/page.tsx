@@ -23,16 +23,28 @@ import {
 } from "@nextui-org/react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
 
-import { CasesAPI, CaseItem } from "@/api/casesApi";
+import { CasesAPI } from "@/api/casesApi";
+import { CaseItem } from "@/types/case.types";
 import {
   NotingsAPI,
   INotingMinuteItem,
   ForwardableOfficer,
 } from "@/api/notingsApi";
+import {
+  signAndForwardSchema,
+  SignAndForwardFormValues,
+} from "@/schemas/notingSchema";
 
-const NOTING_PURPOSES = [
+interface KeyLabelOption {
+  key: string;
+  label: string;
+}
+
+const NOTING_PURPOSES: KeyLabelOption[] = [
   { key: "PWC / Legal Opinion", label: "PWC / Legal Opinion" },
   { key: "Direction to Section", label: "Direction to Section" },
   { key: "Para-Wise Comments (PWC) Approval", label: "Para-Wise Comments (PWC) Approval" },
@@ -40,7 +52,7 @@ const NOTING_PURPOSES = [
   { key: "Other", label: "Other Administrative Note" },
 ];
 
-const URGENCY_OPTIONS = [
+const URGENCY_OPTIONS: KeyLabelOption[] = [
   { key: "High Priority (NDOH)", label: "High Priority (NDOH)" },
   { key: "Urgent", label: "Urgent (Stay Motion)" },
   { key: "Routine", label: "Routine File Movement" },
@@ -51,7 +63,6 @@ function GreenSheetNotingsContent() {
   const queryCaseId = searchParams.get("caseId");
 
   const { isOpen: isVerifyOpen, onOpen: onVerifyOpen, onOpenChange: onVerifyOpenChange } = useDisclosure();
-  const { isOpen: isPrintPreviewOpen, onOpen: onPrintPreviewOpen, onOpenChange: onPrintPreviewOpenChange } = useDisclosure();
 
   const [casesList, setCasesList] = useState<CaseItem[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string>("");
@@ -62,25 +73,45 @@ function GreenSheetNotingsContent() {
   const [loadingNotings, setLoadingNotings] = useState<boolean>(false);
   const [activeDraft, setActiveDraft] = useState<INotingMinuteItem | null>(null);
 
-  const [notingPurpose, setNotingPurpose] = useState<string>("PWC / Legal Opinion");
-  const [fontEncoding, setFontEncoding] = useState<"Unicode" | "Kruti Dev 14">("Unicode");
-  const [destinationUserId, setDestinationUserId] = useState<string>("");
-  const [fileUrgency, setFileUrgency] = useState<"Routine" | "Urgent" | "High Priority (NDOH)">("High Priority (NDOH)");
-  const [dueDate, setDueDate] = useState<string>("");
-  const [notingText, setNotingText] = useState<string>("");
-
   const [isSavingDraft, setIsSavingDraft] = useState<boolean>(false);
   const [isSigning, setIsSigning] = useState<boolean>(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
 
   const [activeSignData, setActiveSignData] = useState<any>(null);
-  const [printMemoData, setPrintMemoData] = useState<any>(null);
+
+  const {
+    control,
+    handleSubmit,
+    setValue,
+    watch,
+    reset,
+    formState: { errors },
+  } = useForm<SignAndForwardFormValues>({
+    resolver: zodResolver(signAndForwardSchema) as any,
+    defaultValues: {
+      minuteTitle: "",
+      notingPurpose: "PWC / Legal Opinion",
+      fontEncoding: "Unicode",
+      content: "",
+      forwardToUserId: "",
+      turnaroundDueDate: "",
+      fileUrgency: "High Priority (NDOH)",
+    },
+  });
+
+  const watchContent = watch("content");
+  const watchPurpose = watch("notingPurpose");
+  const watchEncoding = watch("fontEncoding");
+  const watchRecipient = watch("forwardToUserId");
+  const watchDueDate = watch("turnaroundDueDate");
+  const watchUrgency = watch("fileUrgency");
 
   useEffect(() => {
     async function initData() {
       setLoadingCases(true);
       try {
         const [casesRes, officersRes] = await Promise.all([
-          CasesAPI.getCases({ limit: 100 }),
+          CasesAPI.getCases({ limit: 150 }),
           NotingsAPI.getForwardableOfficers(),
         ]);
 
@@ -97,7 +128,7 @@ function GreenSheetNotingsContent() {
         if (officersRes?.success && Array.isArray(officersRes.data)) {
           setOfficersList(officersRes.data);
           if (officersRes.data.length > 0) {
-            setDestinationUserId(officersRes.data[0].userId);
+            setValue("forwardToUserId", officersRes.data[0].userId);
           }
         }
       } catch (err: any) {
@@ -108,7 +139,7 @@ function GreenSheetNotingsContent() {
       }
     }
     initData();
-  }, [queryCaseId]);
+  }, [queryCaseId, setValue]);
 
   const fetchCaseNotings = useCallback(async (caseId: string) => {
     if (!caseId) return;
@@ -119,15 +150,21 @@ function GreenSheetNotingsContent() {
         setNotings(res.data || []);
         if (res.activeDraft) {
           setActiveDraft(res.activeDraft);
-          setNotingText(res.activeDraft.content || "");
-          setNotingPurpose(res.activeDraft.notingPurpose || "PWC / Legal Opinion");
-          setFontEncoding(res.activeDraft.fontEncoding || "Unicode");
+          setValue("content", res.activeDraft.content || "");
+          setValue("notingPurpose", (res.activeDraft.notingPurpose as any) || "PWC / Legal Opinion");
+          setValue("fontEncoding", res.activeDraft.fontEncoding || "Unicode");
           if (res.activeDraft.forwardToUserId) {
-            setDestinationUserId(String(res.activeDraft.forwardToUserId));
+            setValue("forwardToUserId", String(res.activeDraft.forwardToUserId));
+          }
+          if (res.activeDraft.turnaroundDueDate) {
+            setValue("turnaroundDueDate", new Date(res.activeDraft.turnaroundDueDate).toISOString().split("T")[0]);
+          }
+          if (res.activeDraft.fileUrgency) {
+            setValue("fileUrgency", res.activeDraft.fileUrgency);
           }
         } else {
           setActiveDraft(null);
-          setNotingText("");
+          setValue("content", "");
         }
       }
     } catch (err: any) {
@@ -136,7 +173,7 @@ function GreenSheetNotingsContent() {
     } finally {
       setLoadingNotings(false);
     }
-  }, []);
+  }, [setValue]);
 
   useEffect(() => {
     if (selectedCaseId) {
@@ -148,14 +185,14 @@ function GreenSheetNotingsContent() {
     return casesList.find((c) => c._id === selectedCaseId);
   }, [casesList, selectedCaseId]);
 
-  const caseSelectItems = useMemo(() => {
+  const caseSelectItems: KeyLabelOption[] = useMemo(() => {
     return casesList.map((c) => ({
       key: c._id,
-      label: `${c.fileNo} · ${c.writNumber || "Notice"} — ${c.leadPetitioner}`,
+      label: `${c.fileNo} · ${c.writNumber || c.noticeNumber || "Advance Notice"} — ${c.leadPetitioner}`,
     }));
   }, [casesList]);
 
-  const officerSelectItems = useMemo(() => {
+  const officerSelectItems: KeyLabelOption[] = useMemo(() => {
     return officersList.map((o) => ({
       key: o.userId,
       label: o.displayName,
@@ -163,7 +200,7 @@ function GreenSheetNotingsContent() {
   }, [officersList]);
 
   const handleSaveDraft = async () => {
-    if (!notingText.trim()) {
+    if (!watchContent || !watchContent.trim()) {
       toast.error("Please enter noting text before saving draft.");
       return;
     }
@@ -172,13 +209,13 @@ function GreenSheetNotingsContent() {
     setIsSavingDraft(true);
     try {
       const payload = {
-        content: notingText.trim(),
-        minuteTitle: `Draft Minute #${notings.length + 1} — ${notingPurpose}`,
-        notingPurpose,
-        fontEncoding,
-        forwardToUserId: destinationUserId || undefined,
-        turnaroundDueDate: dueDate || undefined,
-        fileUrgency,
+        content: watchContent.trim(),
+        minuteTitle: `Draft Minute #${notings.length + 1} — ${watchPurpose}`,
+        notingPurpose: watchPurpose,
+        fontEncoding: watchEncoding,
+        forwardToUserId: watchRecipient || undefined,
+        turnaroundDueDate: watchDueDate || undefined,
+        fileUrgency: watchUrgency,
       };
 
       const res = await NotingsAPI.saveDraftNoting(selectedCaseId, payload);
@@ -193,28 +230,20 @@ function GreenSheetNotingsContent() {
     }
   };
 
-  const handleSignAndForward = async () => {
-    if (!notingText.trim()) {
-      toast.error("Noting text cannot be empty.");
-      return;
-    }
-    if (!destinationUserId) {
-      toast.error("Please select an authority to forward the file to.");
-      return;
-    }
+  const onSignAndForwardSubmit = async (values: SignAndForwardFormValues) => {
     if (!selectedCaseId) return;
 
     setIsSigning(true);
     try {
       const payload = {
         minuteId: activeDraft?._id,
-        content: notingText.trim(),
-        minuteTitle: `Minute #${notings.length + 1} — ${notingPurpose}`,
-        notingPurpose,
-        fontEncoding,
-        forwardToUserId: destinationUserId,
-        turnaroundDueDate: dueDate || undefined,
-        fileUrgency,
+        content: values.content.trim(),
+        minuteTitle: `Minute #${notings.length + 1} — ${values.notingPurpose}`,
+        notingPurpose: values.notingPurpose,
+        fontEncoding: values.fontEncoding,
+        forwardToUserId: values.forwardToUserId,
+        turnaroundDueDate: values.turnaroundDueDate || undefined,
+        fileUrgency: values.fileUrgency,
       };
 
       const res = await NotingsAPI.signAndForwardNoting(selectedCaseId, payload);
@@ -223,7 +252,14 @@ function GreenSheetNotingsContent() {
           icon: "✍️",
           duration: 5000,
         });
-        setNotingText("");
+        reset({
+          content: "",
+          minuteTitle: "",
+          notingPurpose: "PWC / Legal Opinion",
+          fontEncoding: "Unicode",
+          forwardToUserId: values.forwardToUserId,
+          fileUrgency: "High Priority (NDOH)",
+        });
         fetchCaseNotings(selectedCaseId);
       }
     } catch (err: any) {
@@ -246,16 +282,29 @@ function GreenSheetNotingsContent() {
     }
   };
 
-  const handleOpenPrintPreview = async () => {
+  const handleDownloadGreenSheetPdf = async () => {
     if (!selectedCaseId) return;
+    setIsDownloadingPdf(true);
+    const toastId = toast.loading("Compiling Certified Green Sheet PDF...");
     try {
-      const res = await NotingsAPI.getPrintMemo(selectedCaseId);
-      if (res?.success) {
-        setPrintMemoData(res);
-        onPrintPreviewOpen();
+      const htmlContent = await NotingsAPI.downloadPrintMemoPdf(selectedCaseId);
+
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        toast.dismiss(toastId);
+        toast.error("Please allow popups to view the Green Sheet PDF.");
+        return;
       }
+
+      printWindow.document.open();
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      toast.success("Green Sheet compiled successfully!", { id: toastId });
     } catch (err: any) {
-      toast.error("Failed to compile print memo");
+      toast.dismiss(toastId);
+      toast.error(err.response?.data?.message || "Failed to download print memo.");
+    } finally {
+      setIsDownloadingPdf(false);
     }
   };
 
@@ -263,7 +312,7 @@ function GreenSheetNotingsContent() {
     <div className="space-y-4">
       {/* 1. Header Information Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
-        <CardBody className="p-4">
+        <CardBody className="p-4 space-y-3">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
@@ -280,7 +329,7 @@ function GreenSheetNotingsContent() {
               <p className="text-xs text-slate-500 ml-9">
                 Viewing Official File Movement &amp; PWC Minutes for:{" "}
                 <b className="text-slate-900">{activeCase?.fileNo || "--"}</b> ·{" "}
-                <span className="text-blue-700 font-semibold">{activeCase?.writNumber || "Advance Notice"}</span>
+                <span className="text-blue-700 font-semibold">{activeCase?.writNumber || activeCase?.noticeNumber || "Advance Notice"}</span>
               </p>
             </div>
 
@@ -312,71 +361,76 @@ function GreenSheetNotingsContent() {
                 radius="sm"
                 className="bg-[#0f2744] text-xs font-semibold text-white shadow-sm hover:bg-[#163a66]"
                 startContent={<span className="material-symbols-rounded text-sm">print</span>}
-                onClick={handleOpenPrintPreview}
+                isLoading={isDownloadingPdf}
+                onClick={handleDownloadGreenSheetPdf}
               >
                 Print Green Sheet
               </Button>
             </div>
           </div>
 
-          {/* Active Case Selector & Quick Status Banner */}
-          <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
+          {/* Clean Full-Width Case Dropdown */}
+          <div className="border-t border-slate-100 pt-3">
             <Select
               size="sm"
               radius="sm"
-              label="Select Case Matter File"
+              label="Select Case Matter E-File Docket"
               labelPlacement="outside"
+              placeholder="Search or pick case docket..."
               items={caseSelectItems}
               selectedKeys={selectedCaseId ? [selectedCaseId] : []}
               onChange={(e) => setSelectedCaseId(e.target.value)}
               isLoading={loadingCases}
-              className="bg-slate-50 font-semibold"
+              className="bg-slate-50 font-semibold w-full"
             >
-              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+              {(item: KeyLabelOption) => <SelectItem key={item.key}>{item.label}</SelectItem>}
             </Select>
+          </div>
 
-            <div className="rounded-lg bg-slate-50 p-2 text-xs border border-slate-200 sm:col-span-2 flex items-center justify-between">
-              <div>
-                <p className="font-bold text-slate-900 truncate max-w-md">{activeCase?.leadPetitioner || "--"}</p>
-                <p className="text-slate-500 text-[11px]">
-                  {activeCase?.court || "--"} · {activeCase?.benchLocation} Bench | NDOH:{" "}
-                  <b className="text-slate-800">
-                    {activeCase?.ndoh ? new Date(activeCase.ndoh).toLocaleDateString("en-GB") : "Not Listed"}
-                  </b>
-                </p>
+          {/* Compact Case Context Strip */}
+          {activeCase && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-2.5 border border-slate-200 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-slate-900">{activeCase.leadPetitioner}</span>
+                <span className="text-slate-400">·</span>
+                <span className="text-slate-600">{activeCase.court} ({activeCase.benchLocation})</span>
+                <span className="text-slate-400">·</span>
+                <span className="font-semibold text-amber-800">
+                  NDOH: {activeCase.ndoh ? new Date(activeCase.ndoh).toLocaleDateString("en-GB") : "Not Listed"}
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
-                {activeCase?.isContemptNotice && (
+                {activeCase.hasActiveStay && (
+                  <Chip size="sm" color="danger" variant="solid" className="font-bold text-[9px] h-5">
+                    STAY ACTIVE
+                  </Chip>
+                )}
+                {activeCase.isContemptNotice && (
                   <Chip size="sm" color="danger" variant="solid" className="font-bold text-[9px] h-5">
                     CONTEMPT
                   </Chip>
                 )}
-                {activeCase?.hasActiveStay && (
-                  <Chip size="sm" color="danger" variant="solid" className="font-bold text-[9px] h-5">
-                    STAY
-                  </Chip>
-                )}
-                <Chip size="sm" color="warning" variant="flat" className="font-bold text-[10px]">
-                  {activeCase?.stage || "Pending PWC"}
+                <Chip size="sm" color="primary" variant="flat" className="font-bold text-[10px]">
+                  {activeCase.stage || "Active Stage"}
                 </Chip>
               </div>
             </div>
-          </div>
+          )}
         </CardBody>
       </Card>
 
-      {/* 2. Main Workspace Split: Left (Green Sheet Ledger) + Right (Drafting Desk) */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        {/* Left: Chronological Ledger (7 Columns) */}
-        <div className="space-y-4 lg:col-span-7">
-          <div className="flex items-center justify-between">
+      {/* 2. Main Workspace Split: Left (Immutable Ledger) + Right (Drafting Desk) */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 items-start">
+        {/* Left: Chronological Ledger (7 Cols, Independent Scroll) */}
+        <div className="space-y-3 lg:col-span-7">
+          <div className="flex items-center justify-between px-1">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Noting Sheet Ledger (Immutable History)
+              Noting Sheet Ledger (Immutable Record)
             </h3>
-            <span className="text-[11px] text-slate-400">Total Minutes: {notings.length}</span>
+            <span className="text-[11px] text-slate-400 font-mono">Total Minutes: {notings.length}</span>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-[calc(100vh-320px)] overflow-y-auto pr-1">
             {loadingNotings ? (
               <div className="space-y-3">
                 <Skeleton className="h-28 w-full rounded-xl" />
@@ -384,15 +438,14 @@ function GreenSheetNotingsContent() {
               </div>
             ) : notings.length > 0 ? (
               notings.map((n) => (
-                <Card key={n.minuteNumber} shadow="none" className="border border-emerald-200/70 bg-emerald-50/30">
+                <Card key={n.minuteNumber} shadow="none" className="border border-emerald-200/80 bg-emerald-50/25">
                   <CardBody className="p-4 space-y-3">
-                    {/* Minute Header */}
                     <div className="flex items-center justify-between border-b border-emerald-200/50 pb-2">
                       <div className="flex items-center gap-2">
-                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700 text-[10px] font-bold text-white">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#0f2744] text-[10px] font-bold text-white">
                           {n.minuteNumber}
                         </span>
-                        <p className="text-xs font-bold text-emerald-950">
+                        <p className="text-xs font-bold text-slate-900">
                           {n.minuteTitle || `Minute #${n.minuteNumber} — ${n.notingPurpose}`}
                         </p>
                       </div>
@@ -413,22 +466,24 @@ function GreenSheetNotingsContent() {
                       )}
                     </div>
 
-                    {/* Minute Content */}
-                    <p className="text-xs text-slate-800 leading-relaxed font-serif whitespace-pre-wrap">
+                    <p
+                      className={`text-xs text-slate-900 leading-relaxed whitespace-pre-wrap ${
+                        n.fontEncoding === "Kruti Dev 14" ? "font-serif" : "font-sans"
+                      }`}
+                    >
                       {n.content}
                     </p>
 
-                    {/* Signature Stamp Footer */}
                     <div className="flex items-center justify-between border-t border-emerald-200/40 pt-2 text-[10px] text-slate-500">
                       <div>
-                        <span className="font-bold text-slate-700">{n.authorName}</span> · {n.authorDesignation}
+                        <span className="font-bold text-slate-800">{n.authorName}</span> · {n.authorDesignation}
                         {n.forwardedToOfficerName && (
-                          <span className="ml-1 text-slate-400">
-                            ➔ Forwarded to: <b>{n.forwardedToOfficerName}</b>
+                          <span className="ml-1 text-slate-600">
+                            ➔ Routed to: <b>{n.forwardedToOfficerName}</b>
                           </span>
                         )}
                       </div>
-                      <div>
+                      <div className="font-mono text-[9px]">
                         {new Date(n.createdAt).toLocaleDateString("en-GB", {
                           day: "2-digit",
                           month: "short",
@@ -438,7 +493,7 @@ function GreenSheetNotingsContent() {
                         })}{" "}
                         {n.signature?.certificateSerialNumber && (
                           <span
-                            className="font-mono text-[9px] text-emerald-800 cursor-pointer underline hover:text-emerald-950 ml-1"
+                            className="text-emerald-800 cursor-pointer underline hover:text-emerald-950 font-bold ml-1"
                             onClick={() => openSignatureModal(n)}
                           >
                             [{n.signature.certificateSerialNumber}]
@@ -457,8 +512,8 @@ function GreenSheetNotingsContent() {
           </div>
         </div>
 
-        {/* Right: New Minute Drafting & File Routing Desk (5 Columns) */}
-        <div className="space-y-4 lg:col-span-5">
+        {/* Right: Drafting & Routing Desk (5 Cols, Sticky) */}
+        <div className="space-y-3 lg:col-span-5 sticky top-4">
           <Card shadow="none" className="border border-slate-200/80 bg-white">
             <div className="border-b border-slate-100 p-4">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
@@ -468,92 +523,131 @@ function GreenSheetNotingsContent() {
             </div>
 
             <CardBody className="p-4 space-y-4">
-              {/* Purpose & Font Normalization */}
               <div className="grid grid-cols-2 gap-3">
-                <Select
-                  size="sm"
-                  label="Noting Purpose"
-                  labelPlacement="outside"
-                  items={NOTING_PURPOSES}
-                  selectedKeys={[notingPurpose]}
-                  onChange={(e) => setNotingPurpose(e.target.value)}
-                  isRequired
-                >
-                  {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
-                </Select>
+                <Controller
+                  name="notingPurpose"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      size="sm"
+                      label="Noting Purpose *"
+                      labelPlacement="outside"
+                      items={NOTING_PURPOSES}
+                      selectedKeys={[field.value]}
+                      onChange={(e) => field.onChange(e.target.value)}
+                      isRequired
+                    >
+                      {(item: KeyLabelOption) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+                    </Select>
+                  )}
+                />
 
                 <div>
                   <p className="text-[11px] font-bold text-slate-700 mb-1">Font Normalization</p>
-                  <RadioGroup
-                    orientation="horizontal"
-                    value={fontEncoding}
-                    onValueChange={(val) => setFontEncoding(val as any)}
-                    classNames={{ wrapper: "gap-3" }}
-                  >
-                    <Radio value="Unicode" classNames={{ label: "text-xs font-semibold" }}>
-                      Unicode
-                    </Radio>
-                    <Radio value="Kruti Dev 14" classNames={{ label: "text-xs font-semibold" }}>
-                      Kruti Dev 14
-                    </Radio>
-                  </RadioGroup>
+                  <Controller
+                    name="fontEncoding"
+                    control={control}
+                    render={({ field }) => (
+                      <RadioGroup
+                        orientation="horizontal"
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        classNames={{ wrapper: "gap-3" }}
+                      >
+                        <Radio value="Unicode" classNames={{ label: "text-xs font-semibold" }}>
+                          Unicode
+                        </Radio>
+                        <Radio value="Kruti Dev 14" classNames={{ label: "text-xs font-semibold" }}>
+                          Kruti Dev
+                        </Radio>
+                      </RadioGroup>
+                    )}
+                  />
                 </div>
               </div>
 
-              {/* Hindi / English Typing Box */}
               <div>
-                <Textarea
-                  size="sm"
-                  minRows={6}
-                  label="Noting Text (हिंदी / English)"
-                  labelPlacement="outside"
-                  placeholder="टिप्पणी यहाँ दर्ज करें..."
-                  value={notingText}
-                  onValueChange={setNotingText}
-                  className="font-serif text-xs leading-relaxed"
-                  isRequired
+                <Controller
+                  name="content"
+                  control={control}
+                  render={({ field }) => (
+                    <Textarea
+                      {...field}
+                      size="sm"
+                      minRows={7}
+                      label="Noting Minute Text (हिंदी / English) *"
+                      labelPlacement="outside"
+                      placeholder="टिप्पणी यहाँ दर्ज करें (उदा. पैरा-वार टिप्पणी CSC कार्यालय को प्रेषित की जानी है)..."
+                      className="font-serif text-xs leading-relaxed"
+                      isInvalid={!!errors.content}
+                      errorMessage={errors.content?.message}
+                      isRequired
+                    />
+                  )}
                 />
               </div>
 
-              <Divider />
+              <Divider className="my-1" />
 
-              {/* Destination Routing Desk */}
-              <div className="space-y-3">
-                <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  Forward File to Authority
-                </h4>
+              {/* Destination Routing Desk with Fixed Margins & Labels */}
+              <div className="space-y-3 pt-1">
+                <div className="border-b border-slate-100 pb-1">
+                  <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                    File Routing &amp; Recipient Officer
+                  </h4>
+                </div>
 
-                <Select
-                  size="sm"
-                  label="Forward To Officer (Recipient)"
-                  labelPlacement="outside"
-                  items={officerSelectItems}
-                  selectedKeys={destinationUserId ? [destinationUserId] : []}
-                  onChange={(e) => setDestinationUserId(e.target.value)}
-                  isRequired
-                >
-                  {(officer) => <SelectItem key={officer.key}>{officer.label}</SelectItem>}
-                </Select>
+                <Controller
+                  name="forwardToUserId"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      size="sm"
+                      label="Route To Desk *"
+                      labelPlacement="outside"
+                      placeholder="Select authority to dispatch file..."
+                      items={officerSelectItems}
+                      selectedKeys={field.value ? [field.value] : []}
+                      onChange={(e) => field.onChange(e.target.value)}
+                      isInvalid={!!errors.forwardToUserId}
+                      errorMessage={errors.forwardToUserId?.message}
+                      isRequired
+                    >
+                      {(officer: KeyLabelOption) => <SelectItem key={officer.key}>{officer.label}</SelectItem>}
+                    </Select>
+                  )}
+                />
 
                 <div className="grid grid-cols-2 gap-3">
-                  <Input
-                    size="sm"
-                    label="Turnaround Due Date"
-                    labelPlacement="outside"
-                    type="date"
-                    value={dueDate}
-                    onValueChange={setDueDate}
+                  <Controller
+                    name="turnaroundDueDate"
+                    control={control}
+                    render={({ field }) => (
+                      <Input
+                        {...field}
+                        size="sm"
+                        label="Turnaround Due Date"
+                        labelPlacement="outside"
+                        type="date"
+                      />
+                    )}
                   />
-                  <Select
-                    size="sm"
-                    label="File Urgency"
-                    labelPlacement="outside"
-                    items={URGENCY_OPTIONS}
-                    selectedKeys={[fileUrgency]}
-                    onChange={(e) => setFileUrgency(e.target.value as any)}
-                  >
-                    {(u) => <SelectItem key={u.key}>{u.label}</SelectItem>}
-                  </Select>
+                  <Controller
+                    name="fileUrgency"
+                    control={control}
+                    render={({ field }) => (
+                      <Select
+                        size="sm"
+                        label="File Urgency"
+                        labelPlacement="outside"
+                        items={URGENCY_OPTIONS}
+                        selectedKeys={[field.value]}
+                        onChange={(e) => field.onChange(e.target.value)}
+                      >
+                        {(u: KeyLabelOption) => <SelectItem key={u.key}>{u.label}</SelectItem>}
+                      </Select>
+                    )}
+                  />
                 </div>
               </div>
 
@@ -573,9 +667,9 @@ function GreenSheetNotingsContent() {
                   size="sm"
                   radius="sm"
                   className="bg-emerald-700 font-semibold text-white shadow hover:bg-emerald-800 text-xs"
-                  startContent={<span className="material-symbols-rounded text-sm">verified</span>}
+                  startContent={!isSigning && <span className="material-symbols-rounded text-sm">verified</span>}
                   isLoading={isSigning}
-                  onClick={handleSignAndForward}
+                  onClick={handleSubmit(onSignAndForwardSubmit)}
                 >
                   Sign &amp; Forward File
                 </Button>
@@ -585,7 +679,7 @@ function GreenSheetNotingsContent() {
         </div>
       </div>
 
-      {/* 1. Digital Signature Certificate Verification Modal */}
+      {/* Digital Signature Certificate Verification Modal */}
       <Modal isOpen={isVerifyOpen} onOpenChange={onVerifyOpenChange} placement="center" size="md">
         <ModalContent>
           {(onClose) => (
@@ -597,7 +691,7 @@ function GreenSheetNotingsContent() {
               <ModalBody className="py-4 space-y-3 text-xs">
                 <div className="rounded-lg bg-emerald-50 p-3 border border-emerald-200 text-emerald-950 space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm">Legal Validity: VALID &amp; TAMPER-EVIDENT</span>
+                    <span className="font-bold text-sm">Legal Validity: VALID &amp; TAMPER-PROOF</span>
                     <Chip size="sm" color="success" variant="solid" className="text-[9px] font-bold">
                       SHA-256
                     </Chip>
@@ -624,7 +718,7 @@ function GreenSheetNotingsContent() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Certificate Serial:</span>
-                    <span className="font-mono text-[11px] text-blue-700">
+                    <span className="font-mono text-[11px] text-blue-700 font-bold">
                       {activeSignData?.certificateSerial || activeSignData?.certificateSerialNumber}
                     </span>
                   </div>
@@ -639,104 +733,6 @@ function GreenSheetNotingsContent() {
               <ModalFooter className="border-t border-slate-100 py-2">
                 <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
                   Close Verification
-                </Button>
-              </ModalFooter>
-            </>
-          )}
-        </ModalContent>
-      </Modal>
-
-      {/* 2. Official Secretariat Green Sheet Print Preview Modal */}
-      <Modal isOpen={isPrintPreviewOpen} onOpenChange={onPrintPreviewOpenChange} placement="center" size="4xl">
-        <ModalContent className="max-h-[90vh]">
-          {(onClose) => (
-            <>
-              <ModalHeader className="border-b border-slate-100 flex items-center justify-between py-3">
-                <div className="flex items-center gap-2">
-                  <span className="material-symbols-rounded text-emerald-700">print</span>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">
-                      Official Green Sheet Print Preview — {printMemoData?.memoHeader?.fileNo || activeCase?.fileNo}
-                    </h3>
-                    <p className="text-[10px] text-slate-400">UPPRPB Legal Secretariat Certified Memo</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 mr-6">
-                  <Button
-                    size="sm"
-                    className="bg-[#0f2744] text-white text-xs h-7"
-                    startContent={<span className="material-symbols-rounded text-sm">print</span>}
-                    onClick={() => window.print()}
-                  >
-                    Print Memo
-                  </Button>
-                </div>
-              </ModalHeader>
-              <ModalBody className="p-6 overflow-y-auto bg-slate-100/60">
-                <div className="mx-auto w-full max-w-2xl bg-[#ebf7ee] border-2 border-emerald-300 p-8 rounded shadow-sm text-xs leading-relaxed space-y-6 font-serif">
-                  {/* Top Seal & Heading */}
-                  <div className="text-center border-b border-emerald-400/60 pb-4">
-                    <p className="font-bold text-sm tracking-wider uppercase text-emerald-950">
-                      {printMemoData?.memoHeader?.institution || "उत्तर प्रदेश पुलिस भर्ती एवं प्रोन्नति बोर्ड, लखनऊ"}
-                    </p>
-                    <p className="text-[11px] text-emerald-800">
-                      तुलसी गंगा कॉम्पलेक्स, 19-सी विधान सभा मार्ग, लखनऊ (विधिक प्रकोष्ठ)
-                    </p>
-                    <div className="mt-2 inline-block bg-white/70 px-3 py-1 rounded border border-emerald-300 text-[11px] font-sans font-bold text-emerald-900">
-                      नोटिंग पत्रावली (Green Noting Sheet) · {printMemoData?.memoHeader?.fileNo || activeCase?.fileNo}
-                    </div>
-                  </div>
-
-                  {/* Litigant Details Header */}
-                  <div className="bg-white/60 p-3 rounded border border-emerald-200 font-sans text-[11px] space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">याचिका / वाद:</span>
-                      <span className="font-bold text-slate-800">{printMemoData?.memoHeader?.parties || activeCase?.leadPetitioner}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">न्यायालय:</span>
-                      <span className="text-slate-800">{printMemoData?.memoHeader?.courtBench || activeCase?.court}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">अग्रिम नियत तिथि (NDOH):</span>
-                      <span className="font-bold text-amber-800">
-                        {activeCase?.ndoh ? new Date(activeCase.ndoh).toLocaleDateString("en-GB") : "Not Listed"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Sequential Minutes Ledger */}
-                  <div className="space-y-4 pt-2">
-                    {printMemoData?.ledgerMinutes && printMemoData.ledgerMinutes.length > 0 ? (
-                      printMemoData.ledgerMinutes.map((m: any) => (
-                        <div key={m.minuteNo} className="border-b border-emerald-300/80 pb-4 space-y-2">
-                          <div className="flex justify-between font-sans text-[11px] font-bold text-emerald-950">
-                            <span>टिप्पणी संख्या (Minute #{m.minuteNo}) — {m.purpose}</span>
-                            <span className="text-[10px] text-emerald-800 font-normal">
-                              {new Date(m.signedAt).toLocaleString("en-GB")}
-                            </span>
-                          </div>
-                          <p className="text-slate-900 text-xs leading-relaxed text-justify whitespace-pre-wrap">
-                            {m.content}
-                          </p>
-                          <div className="flex justify-end pt-2 text-[10px] font-sans text-slate-700">
-                            <div className="text-right">
-                              <p className="font-bold text-emerald-950">{m.signedBy}</p>
-                              <p className="text-slate-600">{m.designation}</p>
-                              <p className="font-mono text-[9px] text-emerald-800">[ह० प्रमाणित: {m.certSerial}]</p>
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-center text-slate-400 italic">No signed minutes recorded on this file.</p>
-                    )}
-                  </div>
-                </div>
-              </ModalBody>
-              <ModalFooter className="border-t border-slate-100 py-2">
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
-                  Close Preview
                 </Button>
               </ModalFooter>
             </>

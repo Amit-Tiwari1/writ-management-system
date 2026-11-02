@@ -25,7 +25,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 
-import { ComplianceAPI, ContemptRadarItem } from "@/api/complianceApi";
+import { ComplianceAPI } from "@/api/complianceApi";
+import { ContemptRadarItem } from "@/types/compliance.types";
 
 export default function ContemptRadarPage() {
   const router = useRouter();
@@ -40,6 +41,7 @@ export default function ContemptRadarPage() {
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [isAlertSending, setIsAlertSending] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
 
   const loadContemptData = useCallback(async () => {
     setLoading(true);
@@ -79,8 +81,32 @@ export default function ContemptRadarPage() {
     }
   };
 
+  const handleExportContemptPdf = async () => {
+    setIsExporting(true);
+    const toastId = toast.loading("Compiling Certified Contempt Radar MIS Sheet...");
+    try {
+      const htmlContent = await ComplianceAPI.downloadContemptPdf();
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        toast.dismiss(toastId);
+        toast.error("Please allow popups to download Contempt MIS Sheet.");
+        return;
+      }
+      printWindow.document.open();
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      toast.success("Contempt MIS Sheet exported successfully!", { id: toastId });
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      toast.error(err.response?.data?.message || "Failed to export Contempt MIS.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
+      {/* 1. Header Information & Severity Tiers Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -92,7 +118,7 @@ export default function ContemptRadarPage() {
                   </Button>
                 </Link>
                 <h1 className="text-base font-bold text-slate-900">5.2 Contempt Risk Radar</h1>
-                <Chip size="sm" className="bg-rose-600 px-1 text-[10px] font-bold text-white">
+                <Chip size="sm" color="danger" variant="solid" className="px-1.5 text-[10px] font-extrabold">
                   {summary.totalShowCauseMatters} Show Cause Matters
                 </Chip>
               </div>
@@ -103,12 +129,23 @@ export default function ContemptRadarPage() {
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
+                variant="bordered"
+                radius="sm"
+                className="border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                startContent={<span className="material-symbols-rounded text-sm text-blue-700">picture_as_pdf</span>}
+                isLoading={isExporting}
+                onClick={handleExportContemptPdf}
+              >
+                Export Contempt MIS
+              </Button>
+              <Button
+                size="sm"
                 radius="sm"
                 className="bg-rose-600 text-xs font-semibold text-white hover:bg-rose-700 shadow-sm"
                 startContent={<span className="material-symbols-rounded text-sm">notification_important</span>}
                 onClick={onAlertOpen}
               >
-                Trigger Red-Zone SMS Alerts
+                Trigger Red-Zone Alerts
               </Button>
             </div>
           </div>
@@ -153,6 +190,7 @@ export default function ContemptRadarPage() {
         </CardBody>
       </Card>
 
+      {/* 2. Main Contempt Countdown Radar Table */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
           <Table removeWrapper aria-label="Contempt cases radar table" className="min-w-full">
@@ -188,7 +226,7 @@ export default function ContemptRadarPage() {
                   <Skeleton className="h-6 w-full rounded" />
                 </div>
               }
-              emptyContent={!loading ? "No pending contempt show-cause notices. Compliance matrix green." : " "}
+              emptyContent={!loading ? "No pending contempt show-cause notices. Compliance matrix clear." : " "}
             >
               {(item: ContemptRadarItem) => {
                 const totalDays = item.countdown?.totalDays || 42;
@@ -263,7 +301,7 @@ export default function ContemptRadarPage() {
                         size="sm"
                         radius="sm"
                         className="bg-emerald-600 text-[11px] font-semibold text-white hover:bg-emerald-700 h-7 px-2"
-                        onClick={() => router.push(`/admin/compliance/archive?caseId=${item.caseId}`)}
+                        onClick={() => router.push(`/admin/compliance/archives?caseId=${item.caseId}`)}
                       >
                         Submit Proof
                       </Button>
@@ -276,6 +314,7 @@ export default function ContemptRadarPage() {
         </CardBody>
       </Card>
 
+      {/* 3. Emergency Level-3 Escalation Modal */}
       <Modal isOpen={isAlertOpen} onOpenChange={onAlertOpenChange} placement="top" size="md">
         <ModalContent>
           {(onClose) => (
@@ -291,13 +330,13 @@ export default function ContemptRadarPage() {
                     There are <b>{summary.level3CriticalUnder3Days} contempt matters</b> having less than 3 days remaining before personal appearance orders are issued.
                   </p>
                 </div>
-                <p className="text-slate-600">
-                  This action triggers high-priority SMS &amp; WhatsApp dispatch to:
+                <p className="text-slate-600 font-semibold">
+                  This action triggers high-priority SMS &amp; system broadcast dispatch to:
                 </p>
-                <div className="rounded border border-slate-200 bg-slate-50 p-2.5 space-y-1 font-mono text-[11px]">
-                  <div>• DG / Chairman Board (Apex Monitoring)</div>
-                  <div>• Member Secretary / ADG (Administration)</div>
-                  <div>• SP Legal / Designated OICs (Compliance Desks)</div>
+                <div className="rounded border border-slate-200 bg-slate-50 p-2.5 space-y-1.5 text-[11px]">
+                  <div className="font-semibold text-slate-800">• DG / Chairman Board (Apex Monitoring)</div>
+                  <div className="font-semibold text-slate-800">• Member Secretary / ADG (Administration)</div>
+                  <div className="font-semibold text-slate-800">• SP Legal / Designated OICs (Compliance Desks)</div>
                 </div>
               </ModalBody>
               <ModalFooter>

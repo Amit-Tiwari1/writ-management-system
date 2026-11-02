@@ -1,138 +1,117 @@
 import axiosClient from "./axiosClient";
+import {
+  ActiveStayItem,
+  StaysRosterResponse,
+  ContemptRadarItem,
+  ContemptRadarResponse,
+  ArchivedComplianceItem,
+} from "../types/compliance.types";
 
-export interface ActiveStayItem {
-  _id: string;
+export type {
+  ActiveStayItem,
+  StaysRosterResponse,
+  ContemptRadarItem,
+  ContemptRadarResponse,
+  ArchivedComplianceItem,
+};
+
+export interface RegisterStayPayload {
   caseId: string;
-  caseAndCnr: {
-    writNumber: string;
-    cnrNumber?: string;
-    fileNo: string;
-  };
-  courtAndCoram: {
-    court: string;
-    coram?: string;
-  };
-  stayOrderScope?: string;
-  orderDateAndDuration: {
-    orderDate?: string;
-    stayDurationDays: number;
-  };
-  vacationMotionStatus: string;
+  stayOrderScope: string;
+  stayDurationDays?: number;
   vacationDeadline?: string;
-  oic: string;
+  vacationMotionStatus?: string;
 }
 
-export interface StaysRosterResponse {
-  success: boolean;
-  metrics: {
-    totalActiveStays: number;
-    vacationMotionsDueUnder7Days: number;
-    vacationApplicationsFiled: number;
-    averageStayDurationDays: number;
-  };
-  data: ActiveStayItem[];
-}
-
-export interface ContemptRadarItem {
-  _id: string;
+export interface RegisterContemptPayload {
   caseId: string;
-  severity: "CRITICAL" | "HIGH_WARNING" | "MONITORED";
-  contemptCaseAndWrit: {
-    contemptNumber: string;
-    originalWrit: string;
-    court: string;
-  };
-  petitionerAndContemnor: {
-    petitioner: string;
-    contemnor: string;
-  };
+  contemptNumber: string;
+  originalWrit: string;
+  contemnorName: string;
   courtDirections: string;
-  countdown: {
-    daysRemaining: number;
-    totalDays: number;
-  };
-  complianceProgress: string;
-  oic: string;
-}
-
-export interface ContemptRadarResponse {
-  success: boolean;
-  summary: {
-    totalShowCauseMatters: number;
-    level3CriticalUnder3Days: number;
-    level2HighWarningUnder7Days: number;
-    level1MonitoredUnder14Days: number;
-  };
-  data: ContemptRadarItem[];
-}
-
-export interface ArchivedComplianceItem {
-  _id: string;
-  caseId: string;
-  caseNoAndCnr: {
-    writNumber: string;
-    cnrNumber?: string;
-  };
-  petitionerAndCourt: {
-    petitioner: string;
-    court: string;
-  };
-  judicialDirectionGiven: string;
-  actionTakenByBoard: string;
-  complianceAffidavitFiled: {
-    date: string;
-    proofDocUrl: string;
-  };
-  closedByAndDate: {
-    closedBy: string;
-    closedAt: string;
-  };
-  status: string;
+  daysRemaining?: number;
+  totalDays?: number;
+  severity?: "CRITICAL" | "HIGH_WARNING" | "MONITORED";
 }
 
 export const ComplianceAPI = {
-  // 5.1 Stays
+  // --- 5.1 Active Stays Roster ---
   getActiveStays: async (): Promise<StaysRosterResponse> => {
     const res = await axiosClient.get("/compliance/stays");
     return res.data;
   },
-  registerStay: async (payload: any) => {
+
+  registerStay: async (
+    payload: RegisterStayPayload
+  ): Promise<{ success: boolean; message: string; data: ActiveStayItem }> => {
     const res = await axiosClient.post("/compliance/stays", payload);
     return res.data;
   },
-  updateVacationMotion: async (id: string, payload: { vacationMotionStatus: string; vacationFilingDate?: string }) => {
+
+  updateVacationMotion: async (
+    id: string,
+    payload: { vacationMotionStatus: string; vacationFilingDate?: string }
+  ): Promise<{ success: boolean; message: string; data: ActiveStayItem }> => {
     const res = await axiosClient.put(`/compliance/stays/${id}/vacation`, payload);
     return res.data;
   },
 
-  // 5.2 Contempt
+  downloadStaysPdf: async (): Promise<string> => {
+    const res = await axiosClient.get("/compliance/stays/export-pdf", {
+      responseType: "text",
+    });
+    return res.data;
+  },
+
+  // --- 5.2 Contempt Risk Radar ---
   getContemptRadar: async (): Promise<ContemptRadarResponse> => {
     const res = await axiosClient.get("/compliance/contempt");
     return res.data;
   },
-  registerContempt: async (payload: any) => {
+
+  registerContempt: async (
+    payload: RegisterContemptPayload
+  ): Promise<{ success: boolean; message: string; data: ContemptRadarItem }> => {
     const res = await axiosClient.post("/compliance/contempt", payload);
     return res.data;
   },
-  triggerRedZoneAlerts: async () => {
+
+  triggerRedZoneAlerts: async (): Promise<{ success: boolean; count: number; message: string }> => {
     const res = await axiosClient.post("/compliance/contempt/trigger-redzone-alerts");
     return res.data;
   },
 
-  // 5.3 Archival
-  getArchivedCompliance: async () => {
-    const res = await axiosClient.get<{ success: boolean; count: number; data: ArchivedComplianceItem[] }>(
-      "/compliance/archives"
-    );
+  downloadContemptPdf: async (): Promise<string> => {
+    const res = await axiosClient.get("/compliance/contempt/export-pdf", {
+      responseType: "text",
+    });
     return res.data;
   },
+
+  // --- 5.3 Compliance Filing & Archival ---
+  getArchivedCompliance: async (): Promise<{
+    success: boolean;
+    count: number;
+    data: ArchivedComplianceItem[];
+  }> => {
+    const res = await axiosClient.get("/compliance/archives");
+    return res.data;
+  },
+
   archiveCase: async (payload: {
     caseId: string;
     actionTakenByBoard: string;
     complianceAffidavitDate?: string;
     complianceProofDocUrl?: string;
-  }) => {
+  }): Promise<{ success: boolean; message: string; data: ArchivedComplianceItem }> => {
     const res = await axiosClient.post("/compliance/archive-case", payload);
+    return res.data;
+  },
+
+  downloadArchivesPdf: async (): Promise<string> => {
+    const res = await axiosClient.get("/compliance/archives/export-pdf", {
+      responseType: "text",
+    });
     return res.data;
   },
 };

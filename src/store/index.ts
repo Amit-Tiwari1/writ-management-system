@@ -10,6 +10,7 @@ export const store = configureStore({
     masters: mastersReducer,
     notifications: notificationReducer,
     cases: casesReducer,
+    users: mastersReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import {
   Table,
   TableHeader,
@@ -34,16 +34,29 @@ import { useRouter, useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 import axiosClient from "@/api/axiosClient";
 import { MastersAPI } from "@/api/mastersApi";
+import { AdminAPI } from "@/api/userApi";
 import { CaseItem, PillsMetrics } from "@/types/case.types";
 import ExportButton from "../components/ExportButton";
+
+interface FilterOption {
+  key: string;
+  label: string;
+}
 
 export default function CaseRegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // Active query parameters from URL
   const currentSearch = searchParams.get("search") || "";
   const currentCourt = searchParams.get("court") || "ALL";
   const currentWing = searchParams.get("wing") || "ALL";
+  const currentCaseType = searchParams.get("caseType") || "ALL";
+  const currentCategory = searchParams.get("category") || "ALL";
+  const currentSubCategory = searchParams.get("subCategory") || "ALL";
+  const currentSubject = searchParams.get("subject") || "ALL";
+  const currentOic = searchParams.get("oic") || "ALL";
+  const currentState = searchParams.get("state") || "ALL";
   const currentStatusFilter = searchParams.get("statusFilter") || "all";
   const currentPage = parseInt(searchParams.get("page") || "1", 10);
   const hearingDateParam = searchParams.get("hearingDate");
@@ -51,13 +64,28 @@ export default function CaseRegisterPage() {
   const { isOpen: isSyncOpen, onOpen: onSyncOpen, onOpenChange: onSyncOpenChange } = useDisclosure();
   const { isOpen: isConnectedOpen, onOpen: onConnectedOpen, onOpenChange: onConnectedOpenChange } = useDisclosure();
 
-  const [courtOptions, setCourtOptions] = useState<Array<{ key: string; label: string }>>([]);
-  const [wingOptions, setWingOptions] = useState<Array<{ key: string; label: string }>>([]);
+  // Master Dropdown States
+  const [courtOptions, setCourtOptions] = useState<FilterOption[]>([]);
+  const [wingOptions, setWingOptions] = useState<FilterOption[]>([]);
+  const [caseTypeOptions, setCaseTypeOptions] = useState<FilterOption[]>([]);
+  const [categoryOptions, setCategoryOptions] = useState<FilterOption[]>([]);
+  const [subCategoryOptions, setSubCategoryOptions] = useState<FilterOption[]>([]);
+  const [subjectOptions, setSubjectOptions] = useState<FilterOption[]>([]);
+  const [oicOptions, setOicOptions] = useState<FilterOption[]>([]);
+  const [stateOptions, setStateOptions] = useState<FilterOption[]>([]);
 
+  // Controlled Filter Form States
   const [searchInput, setSearchInput] = useState<string>(currentSearch);
   const [tempCourt, setTempCourt] = useState<string>(currentCourt);
   const [tempWing, setTempWing] = useState<string>(currentWing);
+  const [tempCaseType, setTempCaseType] = useState<string>(currentCaseType);
+  const [tempCategory, setTempCategory] = useState<string>(currentCategory);
+  const [tempSubCategory, setTempSubCategory] = useState<string>(currentSubCategory);
+  const [tempSubject, setTempSubject] = useState<string>(currentSubject);
+  const [tempOic, setTempOic] = useState<string>(currentOic);
+  const [tempState, setTempState] = useState<string>(currentState);
 
+  // Table Data States
   const [cases, setCases] = useState<CaseItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -79,35 +107,101 @@ export default function CaseRegisterPage() {
     contemptAlerts: 0,
   });
 
+  // Load all foundational master filters dynamically
   useEffect(() => {
-    async function loadMasters() {
+    async function loadMasterFilters() {
       try {
-        const res = await MastersAPI.getIntakeDropdowns();
-        if (res?.success) {
-          if (res.data.courts) {
+        const [intakeRes, subCatRes, subjectRes, usersRes, stateRes] = await Promise.all([
+          MastersAPI.getIntakeDropdowns(),
+          MastersAPI.getSubCategories({ limit: 100 }),
+          MastersAPI.getSubjects({ limit: 150 }),
+          AdminAPI.getUsersList({ limit: 100, status: "ACTIVE" }),
+          MastersAPI.getStates({ limit: 50 }),
+        ]);
+
+        if (intakeRes?.success && intakeRes.data) {
+          if (intakeRes.data.courts) {
             setCourtOptions([
               { key: "ALL", label: "All Courts" },
-              ...res.data.courts.map((c: any) => ({
+              ...intakeRes.data.courts.map((c: any) => ({
                 key: c.shortCode || c.courtName,
                 label: `${c.courtName} (${c.shortCode})`,
               })),
             ]);
           }
-          if (res.data.departments) {
+          if (intakeRes.data.caseTypes) {
+            setCaseTypeOptions([
+              { key: "ALL", label: "All Case Types" },
+              ...intakeRes.data.caseTypes.map((ct: any) => ({
+                key: ct.shortName || ct.caseTypeName,
+                label: `${ct.caseTypeName} (${ct.shortName || ""})`,
+              })),
+            ]);
+          }
+          if (intakeRes.data.categories) {
+            setCategoryOptions([
+              { key: "ALL", label: "All Categories" },
+              ...intakeRes.data.categories.map((cat: any) => ({
+                key: cat.categoryName,
+                label: cat.categoryName,
+              })),
+            ]);
+          }
+          if (intakeRes.data.departments) {
             setWingOptions([
               { key: "ALL", label: "All Wings" },
-              ...res.data.departments.map((d: any) => ({
+              ...intakeRes.data.departments.map((d: any) => ({
                 key: d.unitName,
                 label: d.unitName,
               })),
             ]);
           }
         }
+
+        if (subCatRes?.success && Array.isArray(subCatRes.data)) {
+          setSubCategoryOptions([
+            { key: "ALL", label: "All Sub-Categories / Exams" },
+            ...subCatRes.data.map((sc: any) => ({
+              key: sc.subCategoryName,
+              label: sc.subCategoryName,
+            })),
+          ]);
+        }
+
+        if (subjectRes?.success && Array.isArray(subjectRes.data)) {
+          setSubjectOptions([
+            { key: "ALL", label: "All Dispute Issues" },
+            ...subjectRes.data.map((sub: any) => ({
+              key: sub.subjectTitle,
+              label: sub.subjectTitle,
+            })),
+          ]);
+        }
+
+        if (usersRes?.success && Array.isArray(usersRes.data)) {
+          setOicOptions([
+            { key: "ALL", label: "All Nodal Officers / OIC" },
+            ...usersRes.data.map((u: any) => ({
+              key: u.officerName,
+              label: `${u.officerName} (${u.designationAndWing?.designation || u.assignedRole || "Staff"})`,
+            })),
+          ]);
+        }
+
+        if (stateRes?.success && Array.isArray(stateRes.data)) {
+          setStateOptions([
+            { key: "ALL", label: "All States / Origin" },
+            ...stateRes.data.map((s: any) => ({
+              key: s.stateName,
+              label: s.stateName,
+            })),
+          ]);
+        }
       } catch (err) {
-        console.error("Failed to load dropdowns:", err);
+        console.error("Failed to load master filters:", err);
       }
     }
-    loadMasters();
+    loadMasterFilters();
   }, []);
 
   const buildAndPushUrl = useCallback(
@@ -116,34 +210,48 @@ export default function CaseRegisterPage() {
         search: currentSearch,
         court: currentCourt,
         wing: currentWing,
+        caseType: currentCaseType,
+        category: currentCategory,
+        subCategory: currentSubCategory,
+        subject: currentSubject,
+        oic: currentOic,
+        state: currentState,
         statusFilter: currentStatusFilter,
         page: currentPage,
         ...overrides,
       };
 
       const params = new URLSearchParams();
-      if (merged.search && merged.search.trim().length >= 3) {
-        params.set("search", merged.search.trim());
-      }
-      if (merged.court && merged.court !== "ALL") {
-        params.set("court", merged.court);
-      }
-      if (merged.wing && merged.wing !== "ALL") {
-        params.set("wing", merged.wing);
-      }
-      if (merged.statusFilter && merged.statusFilter !== "all") {
-        params.set("statusFilter", merged.statusFilter);
-      }
-      if (merged.page && merged.page > 1) {
-        params.set("page", String(merged.page));
-      }
-      if (hearingDateParam) {
-        params.set("hearingDate", hearingDateParam);
-      }
+      if (merged.search && merged.search.trim().length >= 3) params.set("search", merged.search.trim());
+      if (merged.court && merged.court !== "ALL") params.set("court", merged.court);
+      if (merged.wing && merged.wing !== "ALL") params.set("wing", merged.wing);
+      if (merged.caseType && merged.caseType !== "ALL") params.set("caseType", merged.caseType);
+      if (merged.category && merged.category !== "ALL") params.set("category", merged.category);
+      if (merged.subCategory && merged.subCategory !== "ALL") params.set("subCategory", merged.subCategory);
+      if (merged.subject && merged.subject !== "ALL") params.set("subject", merged.subject);
+      if (merged.oic && merged.oic !== "ALL") params.set("oic", merged.oic);
+      if (merged.state && merged.state !== "ALL") params.set("state", merged.state);
+      if (merged.statusFilter && merged.statusFilter !== "all") params.set("statusFilter", merged.statusFilter);
+      if (merged.page && merged.page > 1) params.set("page", String(merged.page));
+      if (hearingDateParam) params.set("hearingDate", hearingDateParam);
 
       router.replace(`/admin/cases?${params.toString()}`, { scroll: false });
     },
-    [currentSearch, currentCourt, currentWing, currentStatusFilter, currentPage, hearingDateParam, router]
+    [
+      currentSearch,
+      currentCourt,
+      currentWing,
+      currentCaseType,
+      currentCategory,
+      currentSubCategory,
+      currentSubject,
+      currentOic,
+      currentState,
+      currentStatusFilter,
+      currentPage,
+      hearingDateParam,
+      router,
+    ]
   );
 
   const fetchCases = useCallback(async () => {
@@ -157,6 +265,12 @@ export default function CaseRegisterPage() {
       if (currentSearch.trim().length >= 3) params.search = currentSearch.trim();
       if (currentCourt !== "ALL") params.court = currentCourt;
       if (currentWing !== "ALL") params.wing = currentWing;
+      if (currentCaseType !== "ALL") params.caseType = currentCaseType;
+      if (currentCategory !== "ALL") params.category = currentCategory;
+      if (currentSubCategory !== "ALL") params.subCategory = currentSubCategory;
+      if (currentSubject !== "ALL") params.subject = currentSubject;
+      if (currentOic !== "ALL") params.oic = currentOic;
+      if (currentState !== "ALL") params.state = currentState;
       if (currentStatusFilter !== "all") params.statusFilter = currentStatusFilter;
       if (hearingDateParam) params.hearingDate = hearingDateParam;
 
@@ -176,7 +290,20 @@ export default function CaseRegisterPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, currentSearch, currentCourt, currentWing, currentStatusFilter, hearingDateParam]);
+  }, [
+    currentPage,
+    currentSearch,
+    currentCourt,
+    currentWing,
+    currentCaseType,
+    currentCategory,
+    currentSubCategory,
+    currentSubject,
+    currentOic,
+    currentState,
+    currentStatusFilter,
+    hearingDateParam,
+  ]);
 
   useEffect(() => {
     fetchCases();
@@ -186,7 +313,47 @@ export default function CaseRegisterPage() {
     setSearchInput(currentSearch);
     setTempCourt(currentCourt);
     setTempWing(currentWing);
-  }, [currentSearch, currentCourt, currentWing]);
+    setTempCaseType(currentCaseType);
+    setTempCategory(currentCategory);
+    setTempSubCategory(currentSubCategory);
+    setTempSubject(currentSubject);
+    setTempOic(currentOic);
+    setTempState(currentState);
+  }, [
+    currentSearch,
+    currentCourt,
+    currentWing,
+    currentCaseType,
+    currentCategory,
+    currentSubCategory,
+    currentSubject,
+    currentOic,
+    currentState,
+  ]);
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (currentCourt !== "ALL") count++;
+    if (currentWing !== "ALL") count++;
+    if (currentCaseType !== "ALL") count++;
+    if (currentCategory !== "ALL") count++;
+    if (currentSubCategory !== "ALL") count++;
+    if (currentSubject !== "ALL") count++;
+    if (currentOic !== "ALL") count++;
+    if (currentState !== "ALL") count++;
+    if (currentSearch.trim().length >= 3) count++;
+    return count;
+  }, [
+    currentCourt,
+    currentWing,
+    currentCaseType,
+    currentCategory,
+    currentSubCategory,
+    currentSubject,
+    currentOic,
+    currentState,
+    currentSearch,
+  ]);
 
   const handleSearchChange = (val: string) => {
     setSearchInput(val);
@@ -203,6 +370,12 @@ export default function CaseRegisterPage() {
       search: searchInput.trim().length >= 3 ? searchInput.trim() : "",
       court: tempCourt,
       wing: tempWing,
+      caseType: tempCaseType,
+      category: tempCategory,
+      subCategory: tempSubCategory,
+      subject: tempSubject,
+      oic: tempOic,
+      state: tempState,
       page: 1,
     });
   };
@@ -211,6 +384,12 @@ export default function CaseRegisterPage() {
     setSearchInput("");
     setTempCourt("ALL");
     setTempWing("ALL");
+    setTempCaseType("ALL");
+    setTempCategory("ALL");
+    setTempSubCategory("ALL");
+    setTempSubject("ALL");
+    setTempOic("ALL");
+    setTempState("ALL");
     router.replace("/admin/cases");
   };
 
@@ -280,7 +459,7 @@ export default function CaseRegisterPage() {
     { name: "FILE DOCKET NO.", uid: "fileDocketNo" },
     { name: "JUDICIAL IDENTIFIERS & CONNECTED WRITS", uid: "judicialIdentity" },
     { name: "COURT & BENCH", uid: "court" },
-    { name: "PARTIES", uid: "parties" },
+    { name: "PARTIES & DISPUTE SUBJECT", uid: "parties" },
     { name: "OFFICER & PAIROKAR", uid: "officer" },
     { name: "NEXT HEARING (NDOH)", uid: "ndoh" },
     { name: "PROCEDURAL & INTERNAL HOLD STATUS", uid: "dualStatus" },
@@ -377,10 +556,17 @@ export default function CaseRegisterPage() {
 
         case "parties":
           return (
-            <div className="max-w-[200px]">
+            <div className="max-w-[220px]">
               <p className="truncate text-xs font-bold text-slate-900">{item.leadPetitioner}</p>
               <p className="truncate text-[11px] text-slate-500">vs {item.respondentString}</p>
-              <span className="text-[9px] text-slate-400">{item.disputeSubject}</span>
+              <div className="mt-0.5 flex flex-wrap gap-1">
+                <span className="rounded bg-slate-100 px-1 text-[9px] font-semibold text-slate-600">
+                  {item.category}
+                </span>
+                <span className="truncate text-[9px] font-medium text-blue-700">
+                  {item.disputeSubject}
+                </span>
+              </div>
             </div>
           );
 
@@ -406,7 +592,7 @@ export default function CaseRegisterPage() {
               <Chip
                 size="sm"
                 variant="flat"
-                color={item.isContemptNotice ? "danger" : "warning"}
+                color={item.isContemptNotice ? "danger" : item.hasActiveStay ? "danger" : "warning"}
                 className="text-xs font-bold"
               >
                 {ndohDate}
@@ -506,14 +692,22 @@ export default function CaseRegisterPage() {
   return (
     <div className="space-y-4">
       <Card shadow="none" className="border border-slate-200/80 bg-white">
-        <CardBody className="p-4">
+        <CardBody className="p-4 space-y-3">
+          {/* Header Action Bar */}
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h1 className="text-base font-bold text-slate-900">
-                2.1 Case Register (Master Writ &amp; Connected Writs Index)
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-bold text-slate-900">
+                  2.1 Case Register (Master Writ &amp; Connected Writs Index)
+                </h1>
+                {activeFiltersCount > 0 && (
+                  <Chip size="sm" color="primary" variant="flat" className="text-[10px] font-bold">
+                    {activeFiltersCount} Active Filters
+                  </Chip>
+                )}
+              </div>
               <p className="text-xs text-slate-500">
-                Standalone File Docket · Judicial Notice/Writ/CNR · Connected Writs · Dual Court/Hold Status
+                Institutional File Dockets · Bench Jurisdictions · Hearing Schedules · Exportable MIS Register
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -523,7 +717,14 @@ export default function CaseRegisterPage() {
                   search: currentSearch,
                   court: currentCourt,
                   wing: currentWing,
+                  caseType: currentCaseType,
+                  category: currentCategory,
+                  subCategory: currentSubCategory,
+                  subject: currentSubject,
+                  oic: currentOic,
+                  state: currentState,
                   statusFilter: currentStatusFilter,
+                  hearingDate: hearingDateParam,
                 }}
                 fileBaseName="UPPRPB_Case_Register"
                 allowExcel={true}
@@ -544,7 +745,7 @@ export default function CaseRegisterPage() {
           </div>
 
           {/* 5 Status Metrics Pills */}
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
             {hearingDateParam && (
               <Chip size="sm" color="primary" variant="flat" className="font-bold text-xs">
                 📅 Hearing Date: {hearingDateParam}
@@ -603,12 +804,12 @@ export default function CaseRegisterPage() {
             </Chip>
           </div>
 
-          {/* Search (Strict 3+ Chars) & Controlled Dropdowns */}
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
+          {/* Row 1 Filters: Search, Court, Case Type, Category, Sub-Category */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-5 border-t border-slate-100 pt-3">
             <Input
               size="sm"
               radius="sm"
-              placeholder="Search (min. 3 characters)..."
+              placeholder="Search docket, writ, party (3+ chars)..."
               value={searchInput}
               onValueChange={handleSearchChange}
               onKeyDown={(e) => e.key === "Enter" && handleApplyFilters()}
@@ -619,10 +820,11 @@ export default function CaseRegisterPage() {
             <Select
               size="sm"
               radius="sm"
-              placeholder="Select Court"
-              items={courtOptions.length > 0 ? courtOptions : [{ key: "ALL", label: "All Courts" }]}
+              placeholder="Judicial Forum / Court"
+              aria-label="Court"
+              items={courtOptions}
               selectedKeys={[tempCourt]}
-              onChange={(e) => setTempCourt(e.target.value)}
+              onChange={(e) => setTempCourt(e.target.value || "ALL")}
               className="bg-slate-50"
             >
               {(c) => <SelectItem key={c.key}>{c.label}</SelectItem>}
@@ -631,20 +833,102 @@ export default function CaseRegisterPage() {
             <Select
               size="sm"
               radius="sm"
+              placeholder="Case Type"
+              aria-label="Case Type"
+              items={caseTypeOptions.length > 0 ? caseTypeOptions : [{ key: "ALL", label: "All Case Types" }]}
+              selectedKeys={[tempCaseType]}
+              onChange={(e) => setTempCaseType(e.target.value || "ALL")}
+              className="bg-slate-50"
+            >
+              {(ct) => <SelectItem key={ct.key}>{ct.label}</SelectItem>}
+            </Select>
+
+            <Select
+              size="sm"
+              radius="sm"
+              placeholder="Master Category"
+              aria-label="Category"
+              items={categoryOptions.length > 0 ? categoryOptions : [{ key: "ALL", label: "All Categories" }]}
+              selectedKeys={[tempCategory]}
+              onChange={(e) => setTempCategory(e.target.value || "ALL")}
+              className="bg-slate-50"
+            >
+              {(cat) => <SelectItem key={cat.key}>{cat.label}</SelectItem>}
+            </Select>
+
+            <Select
+              size="sm"
+              radius="sm"
+              placeholder="Exam Cycle / Sub-Category"
+              aria-label="Sub-Category"
+              items={subCategoryOptions.length > 0 ? subCategoryOptions : [{ key: "ALL", label: "All Sub-Categories" }]}
+              selectedKeys={[tempSubCategory]}
+              onChange={(e) => setTempSubCategory(e.target.value || "ALL")}
+              className="bg-slate-50"
+            >
+              {(sc) => <SelectItem key={sc.key}>{sc.label}</SelectItem>}
+            </Select>
+          </div>
+
+          {/* Row 2 Filters: Dispute Subject, Assigned OIC, Wing, State, Action Buttons */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-5">
+            <Select
+              size="sm"
+              radius="sm"
+              placeholder="Litigation Dispute Subject"
+              aria-label="Subject"
+              items={subjectOptions.length > 0 ? subjectOptions : [{ key: "ALL", label: "All Dispute Issues" }]}
+              selectedKeys={[tempSubject]}
+              onChange={(e) => setTempSubject(e.target.value || "ALL")}
+              className="bg-slate-50"
+            >
+              {(sub) => <SelectItem key={sub.key}>{sub.label}</SelectItem>}
+            </Select>
+
+            <Select
+              size="sm"
+              radius="sm"
+              placeholder="Assigned Nodal OIC"
+              aria-label="OIC"
+              items={oicOptions.length > 0 ? oicOptions : [{ key: "ALL", label: "All Nodal Officers" }]}
+              selectedKeys={[tempOic]}
+              onChange={(e) => setTempOic(e.target.value || "ALL")}
+              className="bg-slate-50"
+            >
+              {(o) => <SelectItem key={o.key}>{o.label}</SelectItem>}
+            </Select>
+
+            <Select
+              size="sm"
+              radius="sm"
               placeholder="Owning Wing / Section"
+              aria-label="Section Wing"
               items={wingOptions.length > 0 ? wingOptions : [{ key: "ALL", label: "All Wings" }]}
               selectedKeys={[tempWing]}
-              onChange={(e) => setTempWing(e.target.value)}
+              onChange={(e) => setTempWing(e.target.value || "ALL")}
               className="bg-slate-50"
             >
               {(w) => <SelectItem key={w.key}>{w.label}</SelectItem>}
             </Select>
 
-            <div className="flex gap-2">
+            <Select
+              size="sm"
+              radius="sm"
+              placeholder="State / Origin"
+              aria-label="State"
+              items={stateOptions.length > 0 ? stateOptions : [{ key: "ALL", label: "All States" }]}
+              selectedKeys={[tempState]}
+              onChange={(e) => setTempState(e.target.value || "ALL")}
+              className="bg-slate-50"
+            >
+              {(st) => <SelectItem key={st.key}>{st.label}</SelectItem>}
+            </Select>
+
+            <div className="flex items-center gap-2">
               <Button
                 size="sm"
                 radius="sm"
-                className="w-full bg-[#0f2744] text-xs font-semibold text-white hover:bg-[#163a66]"
+                className="w-full bg-[#0f2744] text-xs font-semibold text-white shadow-sm hover:bg-[#163a66]"
                 onClick={handleApplyFilters}
               >
                 Apply Filters
@@ -653,7 +937,7 @@ export default function CaseRegisterPage() {
                 size="sm"
                 radius="sm"
                 variant="bordered"
-                className="border-slate-200 text-xs font-semibold"
+                className="border-slate-200 text-xs font-semibold text-slate-700"
                 onClick={handleResetFilters}
               >
                 Reset
@@ -673,7 +957,8 @@ export default function CaseRegisterPage() {
             bottomContent={
               <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
                 <span className="text-xs text-slate-500">
-                  Showing Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> (Total <strong>{totalCount}</strong> Records)
+                  Showing Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> (Total{" "}
+                  <strong>{totalCount}</strong> Records)
                 </span>
                 <Pagination
                   size="sm"

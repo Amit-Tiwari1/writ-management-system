@@ -28,9 +28,20 @@ import { useSearchParams } from "next/navigation";
 import toast from "react-hot-toast";
 
 import { ComplianceAPI, ArchivedComplianceItem } from "@/api/complianceApi";
-import { CasesAPI, CaseItem } from "@/api/casesApi";
+import { CasesAPI } from "@/api/casesApi";
+import { CaseItem } from "@/types/case.types";
 
-const ACTION_TAKEN_PRESETS = [
+interface ActionPresetOption {
+  key: string;
+  label: string;
+}
+
+interface CaseSelectOption {
+  key: string;
+  label: string;
+}
+
+const ACTION_TAKEN_PRESETS: ActionPresetOption[] = [
   { key: "ORDER_DECIDED", label: "Representation Decided by Speaking Order" },
   { key: "APPOINTMENT_GIVEN", label: "Appointment / Benefit Granted" },
   { key: "RE_EXAM_HELD", label: "Re-examination / Physical Standard Test (PST) Conducted" },
@@ -48,6 +59,7 @@ function ComplianceArchivalContent() {
   const [activeCases, setActiveCases] = useState<CaseItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
 
   const [selectedCaseId, setSelectedCaseId] = useState<string>("");
   const [actionCategory, setActionCategory] = useState<string>("ORDER_DECIDED");
@@ -62,7 +74,7 @@ function ComplianceArchivalContent() {
     try {
       const [archiveRes, casesRes] = await Promise.all([
         ComplianceAPI.getArchivedCompliance(),
-        CasesAPI.getCases({ limit: 100 }),
+        CasesAPI.getCases({ limit: 150 }),
       ]);
 
       if (archiveRes?.success && Array.isArray(archiveRes.data)) {
@@ -94,20 +106,20 @@ function ComplianceArchivalContent() {
     loadData();
   }, [loadData]);
 
-  const caseSelectOptions = useMemo(() => {
+  const caseSelectOptions: CaseSelectOption[] = useMemo(() => {
     return activeCases.map((c) => ({
       key: c._id,
-      label: `${c.fileNo} · ${c.writNumber || "Writ Pending"} — ${c.leadPetitioner}`,
+      label: `${c.fileNo} · ${c.writNumber || c.noticeNumber || "Advance Notice"} — ${c.leadPetitioner}`,
     }));
   }, [activeCases]);
 
   const handleArchiveSubmit = async (onClose: () => void) => {
     if (!selectedCaseId) {
-      toast.error("Please select a case to archive.");
+      toast.error("Please select a case docket to archive.");
       return;
     }
     if (!narrativeSummary.trim()) {
-      toast.error("Compliance action summary is required.");
+      toast.error("Compliance action narrative summary is mandatory.");
       return;
     }
 
@@ -136,6 +148,29 @@ function ComplianceArchivalContent() {
     }
   };
 
+  const handleExportArchivePdf = async () => {
+    setIsExporting(true);
+    const toastId = toast.loading("Compiling Certified Archival MIS Sheet...");
+    try {
+      const htmlContent = await ComplianceAPI.downloadArchivesPdf();
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        toast.dismiss(toastId);
+        toast.error("Please allow popups to download Archival MIS Sheet.");
+        return;
+      }
+      printWindow.document.open();
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      toast.success("Archival MIS Sheet exported successfully!", { id: toastId });
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      toast.error(err.response?.data?.message || "Failed to export Archival MIS.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleOpenAffidavitViewer = (item: ArchivedComplianceItem) => {
     setViewingAffidavit(item);
     onViewerOpen();
@@ -143,7 +178,7 @@ function ComplianceArchivalContent() {
 
   return (
     <div className="space-y-4">
-      {/* Header Info */}
+      {/* 1. Header Information Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -155,8 +190,8 @@ function ComplianceArchivalContent() {
                   </Button>
                 </Link>
                 <h1 className="text-base font-bold text-slate-900">5.3 Compliance Filing &amp; Archival</h1>
-                <Chip size="sm" className="bg-emerald-500/20 px-1 text-[10px] font-bold text-emerald-800">
-                  Case Closeout Workflow
+                <Chip size="sm" color="success" variant="flat" className="px-1.5 text-[10px] font-extrabold">
+                  {archivedList.length} Disposed Matched
                 </Chip>
               </div>
               <p className="text-xs text-slate-500 ml-9">
@@ -164,6 +199,17 @@ function ComplianceArchivalContent() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="bordered"
+                radius="sm"
+                className="border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                startContent={<span className="material-symbols-rounded text-sm text-blue-700">picture_as_pdf</span>}
+                isLoading={isExporting}
+                onClick={handleExportArchivePdf}
+              >
+                Export Archive MIS
+              </Button>
               <Button
                 size="sm"
                 radius="sm"
@@ -178,7 +224,7 @@ function ComplianceArchivalContent() {
         </CardBody>
       </Card>
 
-      {/* Archived Cases Grid */}
+      {/* 2. Permanent Complied Archive Table Grid */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <div className="flex items-center justify-between border-b border-slate-100 p-4">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -283,7 +329,7 @@ function ComplianceArchivalContent() {
         </CardBody>
       </Card>
 
-      {/* 1. Compliance Submission & Closeout Modal */}
+      {/* 3. Compliance Submission & Closeout Modal */}
       <Modal isOpen={isOpen} onOpenChange={onOpenChange} placement="top" size="2xl">
         <ModalContent>
           {(onClose) => (
@@ -303,7 +349,7 @@ function ComplianceArchivalContent() {
                   placeholder="Select open case docket..."
                   isRequired
                 >
-                  {(c) => <SelectItem key={c.key}>{c.label}</SelectItem>}
+                  {(c: CaseSelectOption) => <SelectItem key={c.key}>{c.label}</SelectItem>}
                 </Select>
 
                 <Select
@@ -315,7 +361,7 @@ function ComplianceArchivalContent() {
                   onChange={(e) => setActionCategory(e.target.value)}
                   isRequired
                 >
-                  {(a) => <SelectItem key={a.key}>{a.label}</SelectItem>}
+                  {(a: ActionPresetOption) => <SelectItem key={a.key}>{a.label}</SelectItem>}
                 </Select>
 
                 <Textarea
@@ -354,7 +400,7 @@ function ComplianceArchivalContent() {
         </ModalContent>
       </Modal>
 
-      {/* 2. Certified Compliance Proof Viewer Modal */}
+      {/* 4. Certified Compliance Proof Viewer Modal */}
       <Modal isOpen={isViewerOpen} onOpenChange={onViewerOpenChange} placement="center" size="2xl">
         <ModalContent>
           {(onClose) => (

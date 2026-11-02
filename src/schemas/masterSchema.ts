@@ -1,27 +1,5 @@
 import { z } from "zod";
 
-
-export const respondentGroupSchema = z.object({
-  groupName: z
-    .string()
-    .min(2, "Respondent group code must be at least 2 characters")
-    .max(100, "Group code is too long")
-    .transform((val) => val.trim().toUpperCase()),
-  defaultRankTitle: z
-    .string()
-    .min(2, "Official title must be at least 2 characters")
-    .max(150, "Title is too long")
-    .transform((val) => val.trim()),
-  defaultAddress: z
-    .string()
-    .min(5, "Official service address must be at least 5 characters")
-    .transform((val) => val.trim()),
-  isOurOffice: z.boolean().default(false),
-});
-
-export type RespondentGroupFormValues = z.infer<typeof respondentGroupSchema>;
-
-
 export const stateSchema = z.object({
   stateName: z.string().min(2, "State name is required").trim(),
   stateCode: z.string().min(2, "State code is required").max(10).toUpperCase().trim(),
@@ -46,7 +24,6 @@ export const districtSchema = z.object({
   zoneId: z.string().min(1, "Zone selection is required"),
   rangeId: z.string().min(1, "Range selection is required"),
 });
-
 
 export const courtSchema = z.object({
   courtName: z.string().min(3, "Court name is required").trim(),
@@ -79,6 +56,14 @@ export const subjectSchema = z.object({
   subjectTitle: z.string().min(2, "Subject title is required").trim(),
 });
 
+export const custodianMappingSchema = z.object({
+  categoryId: z.string().min(1, "Case Category selection is required"),
+  subjectId: z.string().min(1, "Litigation Subject selection is required"),
+  roleOrDesignation: z.string().min(1, "Designation / Role selection is required"),
+  officerName: z.string().min(2, "Assigned Officer selection is required").trim(),
+  officerUserId: z.string().optional().default(""),
+});
+
 export const rankSchema = z.object({
   rankName: z.string().min(2, "Rank name is required").trim(),
   shortCode: z.string().min(2, "Short code is required").toUpperCase().trim(),
@@ -101,6 +86,30 @@ export const departmentSchema = z.object({
   headquarters: z.string().default("Lucknow"),
 });
 
+export const respondentGroupSchema = z.object({
+  groupName: z
+    .string()
+    .min(2, "Respondent group code must be at least 2 characters")
+    .max(100, "Group code is too long")
+    .transform((val) => val.trim().toUpperCase()),
+  defaultRankTitle: z
+    .string()
+    .min(2, "Official title must be at least 2 characters")
+    .max(150, "Title is too long")
+    .transform((val) => val.trim()),
+  defaultAddress: z
+    .string()
+    .min(5, "Official service address must be at least 5 characters")
+    .transform((val) => val.trim()),
+  isOurOffice: z.boolean().default(false),
+});
+
+export const standingCounselSchema = z.object({
+  name: z.string().min(2, "Counsel name is required").trim(),
+  monitoredBenches: z.string().min(2, "Monitored bench selection is required").trim(),
+  autoFlag: z.boolean().default(true),
+});
+
 export const actionMappingSchema = z.object({
   courtDecision: z.string().min(2, "Court decision is required").trim(),
   actionStatus: z.string().min(2, "Action status is required").trim(),
@@ -116,3 +125,21 @@ export const aliasSchema = z.object({
   category: z.string().default("BOARD_ALIAS"),
   matchWeight: z.string().default("1.0"),
 });
+
+export type StateFormValues = z.infer<typeof stateSchema>;
+export type ZoneFormValues = z.infer<typeof zoneSchema>;
+export type RangeFormValues = z.infer<typeof rangeSchema>;
+export type DistrictFormValues = z.infer<typeof districtSchema>;
+export type CourtFormValues = z.infer<typeof courtSchema>;
+export type CaseTypeFormValues = z.infer<typeof caseTypeSchema>;
+export type CategoryFormValues = z.infer<typeof categorySchema>;
+export type SubCategoryFormValues = z.infer<typeof subCategorySchema>;
+export type SubjectFormValues = z.infer<typeof subjectSchema>;
+export type CustodianMappingFormValues = z.infer<typeof custodianMappingSchema>;
+export type RankFormValues = z.infer<typeof rankSchema>;
+export type DesignationFormValues = z.infer<typeof designationSchema>;
+export type DepartmentFormValues = z.infer<typeof departmentSchema>;
+export type RespondentGroupFormValues = z.infer<typeof respondentGroupSchema>;
+export type StandingCounselFormValues = z.infer<typeof standingCounselSchema>;
+export type ActionMappingFormValues = z.infer<typeof actionMappingSchema>;
+export type AliasFormValues = z.infer<typeof aliasSchema>;

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   CardBody,
@@ -22,38 +22,112 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
-  Skeleton,
+  Pagination,
+  Spinner,
 } from "@nextui-org/react";
 import Link from "next/link";
 import toast from "react-hot-toast";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+
 import { MastersAPI } from "@/api/mastersApi";
+import {
+  stateSchema,
+  zoneSchema,
+  rangeSchema,
+  districtSchema,
+} from "@/schemas/masterSchema";
+import {
+  IStateItem,
+  IZoneItem,
+  IRangeItem,
+  IDistrictItem,
+} from "@/types/master.types";
+import { z } from "zod";
+
+type StateFormValues = z.infer<typeof stateSchema>;
+type ZoneFormValues = z.infer<typeof zoneSchema>;
+type RangeFormValues = z.infer<typeof rangeSchema>;
+type DistrictFormValues = z.infer<typeof districtSchema>;
 
 export default function LocationMasterPage() {
   const [activeTab, setActiveTab] = useState<string>("districts");
   const [loading, setLoading] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const [states, setStates] = useState<any[]>([]);
-  const [zones, setZones] = useState<any[]>([]);
-  const [ranges, setRanges] = useState<any[]>([]);
-  const [districts, setDistricts] = useState<any[]>([]);
+  const [states, setStates] = useState<IStateItem[]>([]);
+  const [zones, setZones] = useState<IZoneItem[]>([]);
+  const [ranges, setRanges] = useState<IRangeItem[]>([]);
+  const [districts, setDistricts] = useState<IDistrictItem[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const rowsPerPage = 10;
 
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
-
-  const [formData, setFormData] = useState<any>({});
   const [itemToDelete, setItemToDelete] = useState<any>(null);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // 1. State Form
+  const {
+    control: stateControl,
+    handleSubmit: handleStateSubmit,
+    reset: resetStateForm,
+    formState: { errors: stateErrors },
+  } = useForm<StateFormValues>({
+    resolver: zodResolver(stateSchema) as any,
+    defaultValues: { stateName: "", stateCode: "", country: "India" },
+  });
+
+  // 2. Zone Form
+  const {
+    control: zoneControl,
+    handleSubmit: handleZoneSubmit,
+    reset: resetZoneForm,
+    formState: { errors: zoneErrors },
+  } = useForm<ZoneFormValues>({
+    resolver: zodResolver(zoneSchema) as any,
+    defaultValues: { zoneName: "", stateId: "", headquarters: "" },
+  });
+
+  // 3. Range Form
+  const {
+    control: rangeControl,
+    handleSubmit: handleRangeSubmit,
+    watch: watchRangeForm,
+    setValue: setRangeValue,
+    reset: resetRangeForm,
+    formState: { errors: rangeErrors },
+  } = useForm<RangeFormValues>({
+    resolver: zodResolver(rangeSchema) as any,
+    defaultValues: { rangeName: "", zoneId: "", stateId: "" },
+  });
+
+  // 4. District Form
+  const {
+    control: districtControl,
+    handleSubmit: handleDistrictSubmit,
+    watch: watchDistrictForm,
+    setValue: setDistrictValue,
+    reset: resetDistrictForm,
+    formState: { errors: districtErrors },
+  } = useForm<DistrictFormValues>({
+    resolver: zodResolver(districtSchema) as any,
+    defaultValues: { districtName: "", stateId: "", zoneId: "", rangeId: "" },
+  });
+
+  const selectedRangeStateId = watchRangeForm("stateId");
+  const selectedDistrictStateId = watchDistrictForm("stateId");
+  const selectedDistrictZoneId = watchDistrictForm("zoneId");
 
   const loadLocationData = useCallback(async () => {
     setLoading(true);
     try {
       const [resStates, resZones, resRanges, resDistricts] = await Promise.all([
-        MastersAPI.getStates(),
+        MastersAPI.getStates({ limit: 100 }),
         MastersAPI.getZones(),
         MastersAPI.getRanges(),
-        MastersAPI.getDistricts(),
+        MastersAPI.getDistricts({ limit: 200 }),
       ]);
 
       setStates(resStates?.data || []);
@@ -71,74 +145,112 @@ export default function LocationMasterPage() {
     loadLocationData();
   }, [loadLocationData]);
 
+  // Dynamic filter items for dropdowns
+  const stateSelectItems = useMemo(() => {
+    return states.map((s) => ({ key: s._id, label: s.stateName }));
+  }, [states]);
+
+  const availableZonesForRange = useMemo(() => {
+    return zones
+      .filter((z) => {
+        const sId = typeof z.stateId === "object" ? (z.stateId as any)?._id : z.stateId;
+        return !selectedRangeStateId || sId === selectedRangeStateId;
+      })
+      .map((z) => ({ key: z._id, label: z.zoneName }));
+  }, [zones, selectedRangeStateId]);
+
+  const availableZonesForDistrict = useMemo(() => {
+    return zones
+      .filter((z) => {
+        const sId = typeof z.stateId === "object" ? (z.stateId as any)?._id : z.stateId;
+        return !selectedDistrictStateId || sId === selectedDistrictStateId;
+      })
+      .map((z) => ({ key: z._id, label: z.zoneName }));
+  }, [zones, selectedDistrictStateId]);
+
+  const availableRangesForDistrict = useMemo(() => {
+    return ranges
+      .filter((r) => {
+        const zId = typeof r.zoneId === "object" ? (r.zoneId as any)?._id : r.zoneId;
+        return !selectedDistrictZoneId || zId === selectedDistrictZoneId;
+      })
+      .map((r) => ({ key: r._id, label: r.rangeName }));
+  }, [ranges, selectedDistrictZoneId]);
+
   const handleOpenAdd = () => {
-    setFormData({
-      stateId: states[0]?._id || "",
-      zoneId: "",
-      rangeId: "",
-      stateName: "",
-      stateCode: "",
-      zoneName: "",
-      rangeName: "",
-      districtName: "",
-      headquarters: "",
-    });
+    const defaultStateId = states[0]?._id || "";
+    if (activeTab === "states") {
+      resetStateForm({ stateName: "", stateCode: "", country: "India" });
+    } else if (activeTab === "zones") {
+      resetZoneForm({ zoneName: "", stateId: defaultStateId, headquarters: "" });
+    } else if (activeTab === "ranges") {
+      resetRangeForm({ rangeName: "", stateId: defaultStateId, zoneId: "" });
+    } else if (activeTab === "districts") {
+      resetDistrictForm({ districtName: "", stateId: defaultStateId, zoneId: "", rangeId: "" });
+    }
     onAddOpen();
   };
 
-  const handleSubmitAdd = async () => {
+  // Submit Handlers
+  const onAddState = async (values: StateFormValues) => {
     setIsSubmitting(true);
     try {
-      if (activeTab === "states") {
-        if (!formData.stateName?.trim() || !formData.stateCode?.trim()) {
-          toast.error("State name and state code are required");
-          return;
-        }
-        await MastersAPI.createState({
-          stateName: formData.stateName.trim(),
-          stateCode: formData.stateCode.trim().toUpperCase(),
-        });
+      const res = await MastersAPI.createState(values);
+      if (res?.success) {
         toast.success("State registered successfully!");
-      } else if (activeTab === "zones") {
-        if (!formData.zoneName?.trim() || !formData.stateId) {
-          toast.error("Zone name and state selection are required");
-          return;
-        }
-        await MastersAPI.createZone({
-          zoneName: formData.zoneName.trim(),
-          stateId: formData.stateId,
-          headquarters: formData.headquarters?.trim() || "",
-        });
-        toast.success("Zone registered successfully!");
-      } else if (activeTab === "ranges") {
-        if (!formData.rangeName?.trim() || !formData.zoneId || !formData.stateId) {
-          toast.error("Range name, state, and zone selections are required");
-          return;
-        }
-        await MastersAPI.createRange({
-          rangeName: formData.rangeName.trim(),
-          stateId: formData.stateId,
-          zoneId: formData.zoneId,
-        });
-        toast.success("Range registered successfully!");
-      } else if (activeTab === "districts") {
-        if (!formData.districtName?.trim() || !formData.stateId || !formData.zoneId || !formData.rangeId) {
-          toast.error("District name, state, zone, and range selections are required");
-          return;
-        }
-        await MastersAPI.createDistrict({
-          districtName: formData.districtName.trim(),
-          stateId: formData.stateId,
-          zoneId: formData.zoneId,
-          rangeId: formData.rangeId,
-        });
-        toast.success("District registered successfully!");
+        onAddOpenChange();
+        loadLocationData();
       }
-
-      onAddOpenChange();
-      loadLocationData();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to save record");
+      toast.error(err.response?.data?.message || "Failed to create state");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const onAddZone = async (values: ZoneFormValues) => {
+    setIsSubmitting(true);
+    try {
+      const res = await MastersAPI.createZone(values);
+      if (res?.success) {
+        toast.success("Administrative Zone registered successfully!");
+        onAddOpenChange();
+        loadLocationData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to create zone");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const onAddRange = async (values: RangeFormValues) => {
+    setIsSubmitting(true);
+    try {
+      const res = await MastersAPI.createRange(values);
+      if (res?.success) {
+        toast.success("Police Range registered successfully!");
+        onAddOpenChange();
+        loadLocationData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to create police range");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const onAddDistrict = async (values: DistrictFormValues) => {
+    setIsSubmitting(true);
+    try {
+      const res = await MastersAPI.createDistrict(values);
+      if (res?.success) {
+        toast.success("District registered successfully!");
+        onAddOpenChange();
+        loadLocationData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to create district");
     } finally {
       setIsSubmitting(false);
     }
@@ -166,27 +278,70 @@ export default function LocationMasterPage() {
     }
   };
 
-  const filteredZones = zones.filter((z) => !formData.stateId || z.stateId?._id === formData.stateId || z.stateId === formData.stateId);
-  const filteredRanges = ranges.filter((r) => !formData.zoneId || r.zoneId?._id === formData.zoneId || r.zoneId === formData.zoneId);
+  // Search filter per tab
+  const filteredDistricts = useMemo(() => {
+    return districts.filter((d) => d.districtName?.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [districts, searchQuery]);
+
+  const filteredRangesList = useMemo(() => {
+    return ranges.filter((r) => r.rangeName?.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [ranges, searchQuery]);
+
+  const filteredZonesList = useMemo(() => {
+    return zones.filter((z) => z.zoneName?.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [zones, searchQuery]);
+
+  const filteredStatesList = useMemo(() => {
+    return states.filter((s) => s.stateName?.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [states, searchQuery]);
+
+  const currentListLength = useMemo(() => {
+    if (activeTab === "districts") return filteredDistricts.length;
+    if (activeTab === "ranges") return filteredRangesList.length;
+    if (activeTab === "zones") return filteredZonesList.length;
+    return filteredStatesList.length;
+  }, [activeTab, filteredDistricts, filteredRangesList, filteredZonesList, filteredStatesList]);
+
+  const totalPages = Math.ceil(currentListLength / rowsPerPage) || 1;
+
+  const paginatedDistricts = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    return filteredDistricts.slice(start, start + rowsPerPage);
+  }, [filteredDistricts, page, rowsPerPage]);
+
+  const paginatedRanges = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    return filteredRangesList.slice(start, start + rowsPerPage);
+  }, [filteredRangesList, page, rowsPerPage]);
+
+  const paginatedZones = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    return filteredZonesList.slice(start, start + rowsPerPage);
+  }, [filteredZonesList, page, rowsPerPage]);
+
+  const paginatedStates = useMemo(() => {
+    const start = (page - 1) * rowsPerPage;
+    return filteredStatesList.slice(start, start + rowsPerPage);
+  }, [filteredStatesList, page, rowsPerPage]);
 
   return (
     <div className="space-y-4">
-      {/* Header Info */}
+      {/* 1. Header Information */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-2">
-              <Link href="/admin/cases">
+              <Link href="/admin/masters">
                 <Button isIconOnly size="sm" variant="light" className="text-slate-500">
                   <span className="material-symbols-rounded">arrow_back</span>
                 </Button>
               </Link>
               <div>
                 <h1 className="text-base font-bold text-slate-900">
-                  6.1 Geographical Hierarchy Master
+                  7.1 Geographical Jurisdiction Master
                 </h1>
                 <p className="text-xs text-slate-500">
-                  State $\rightarrow$ Zone $\rightarrow$ Police Range $\rightarrow$ District Jurisdiction mapping
+                  Four-tier governance mapping: State &rarr; Administrative Zone &rarr; Police Range &rarr; District
                 </p>
               </div>
             </div>
@@ -209,6 +364,7 @@ export default function LocationMasterPage() {
               onSelectionChange={(key) => {
                 setActiveTab(key as string);
                 setSearchQuery("");
+                setPage(1);
               }}
               color="primary"
               variant="underlined"
@@ -231,7 +387,10 @@ export default function LocationMasterPage() {
                 radius="sm"
                 placeholder="Search active view..."
                 value={searchQuery}
-                onValueChange={setSearchQuery}
+                onValueChange={(val) => {
+                  setSearchQuery(val);
+                  setPage(1);
+                }}
                 startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
                 className="bg-slate-50"
               />
@@ -240,11 +399,33 @@ export default function LocationMasterPage() {
         </CardBody>
       </Card>
 
-      {/* Main Table View */}
+      {/* 2. Main Table View with Pagination */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
           {activeTab === "districts" && (
-            <Table removeWrapper aria-label="District table" className="min-w-full">
+            <Table
+              removeWrapper
+              aria-label="District table"
+              className="min-w-full"
+              bottomContent={
+                totalPages > 1 ? (
+                  <div className="flex w-full justify-between items-center p-3 border-t border-slate-100">
+                    <span className="text-xs text-slate-500">
+                      Showing {(page - 1) * rowsPerPage + 1} to{" "}
+                      {Math.min(page * rowsPerPage, filteredDistricts.length)} of {filteredDistricts.length}
+                    </span>
+                    <Pagination
+                      isCompact
+                      showControls
+                      color="primary"
+                      page={page}
+                      total={totalPages}
+                      onChange={(p) => setPage(p)}
+                    />
+                  </div>
+                ) : null
+              }
+            >
               <TableHeader>
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400">STATE</TableColumn>
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400">ZONE</TableColumn>
@@ -253,16 +434,28 @@ export default function LocationMasterPage() {
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400 text-center">ACTION</TableColumn>
               </TableHeader>
               <TableBody
-                items={districts.filter((d) => d.districtName?.toLowerCase().includes(searchQuery.toLowerCase()))}
-                isLoading={loading}
-                loadingContent={<div className="p-4 space-y-2"><Skeleton className="h-6 w-full rounded" /><Skeleton className="h-6 w-full rounded" /></div>}
-                emptyContent="No districts found"
+                items={paginatedDistricts}
+                emptyContent={
+                  loading ? (
+                    <div className="py-6 flex justify-center items-center gap-2 text-slate-500">
+                      <Spinner size="sm" /> Loading districts...
+                    </div>
+                  ) : (
+                    "No districts found"
+                  )
+                }
               >
                 {(item) => (
                   <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                    <TableCell className="text-xs font-semibold text-slate-800">{item.stateId?.stateName || "--"}</TableCell>
-                    <TableCell className="text-xs text-slate-600">{item.zoneId?.zoneName || "--"}</TableCell>
-                    <TableCell className="text-xs text-slate-600">{item.rangeId?.rangeName || "--"}</TableCell>
+                    <TableCell className="text-xs font-semibold text-slate-800">
+                      {typeof item.stateId === "object" ? (item.stateId as any)?.stateName : "--"}
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-600">
+                      {typeof item.zoneId === "object" ? (item.zoneId as any)?.zoneName : "--"}
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-600">
+                      {typeof item.rangeId === "object" ? (item.rangeId as any)?.rangeName : "--"}
+                    </TableCell>
                     <TableCell className="text-xs font-bold text-slate-900">{item.districtName}</TableCell>
                     <TableCell className="text-center">
                       <Button
@@ -282,22 +475,55 @@ export default function LocationMasterPage() {
           )}
 
           {activeTab === "ranges" && (
-            <Table removeWrapper aria-label="Range table" className="min-w-full">
+            <Table
+              removeWrapper
+              aria-label="Range table"
+              className="min-w-full"
+              bottomContent={
+                totalPages > 1 ? (
+                  <div className="flex w-full justify-between items-center p-3 border-t border-slate-100">
+                    <span className="text-xs text-slate-500">
+                      Showing {(page - 1) * rowsPerPage + 1} to{" "}
+                      {Math.min(page * rowsPerPage, filteredRangesList.length)} of {filteredRangesList.length}
+                    </span>
+                    <Pagination
+                      isCompact
+                      showControls
+                      color="primary"
+                      page={page}
+                      total={totalPages}
+                      onChange={(p) => setPage(p)}
+                    />
+                  </div>
+                ) : null
+              }
+            >
               <TableHeader>
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400">RANGE NAME</TableColumn>
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400">PARENT ZONE</TableColumn>
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400">STATE</TableColumn>
               </TableHeader>
               <TableBody
-                items={ranges.filter((r) => r.rangeName?.toLowerCase().includes(searchQuery.toLowerCase()))}
-                isLoading={loading}
-                emptyContent="No police ranges found"
+                items={paginatedRanges}
+                emptyContent={
+                  loading ? (
+                    <div className="py-6 flex justify-center items-center gap-2 text-slate-500">
+                      <Spinner size="sm" /> Loading police ranges...
+                    </div>
+                  ) : (
+                    "No police ranges found"
+                  )
+                }
               >
                 {(item) => (
                   <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
                     <TableCell className="text-xs font-bold text-slate-900">{item.rangeName}</TableCell>
-                    <TableCell className="text-xs text-slate-700">{item.zoneId?.zoneName || "--"}</TableCell>
-                    <TableCell className="text-xs text-slate-600">{item.stateId?.stateName || "--"}</TableCell>
+                    <TableCell className="text-xs text-slate-700">
+                      {typeof item.zoneId === "object" ? (item.zoneId as any)?.zoneName : "--"}
+                    </TableCell>
+                    <TableCell className="text-xs text-slate-600">
+                      {typeof item.stateId === "object" ? (item.stateId as any)?.stateName : "--"}
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -305,21 +531,52 @@ export default function LocationMasterPage() {
           )}
 
           {activeTab === "zones" && (
-            <Table removeWrapper aria-label="Zone table" className="min-w-full">
+            <Table
+              removeWrapper
+              aria-label="Zone table"
+              className="min-w-full"
+              bottomContent={
+                totalPages > 1 ? (
+                  <div className="flex w-full justify-between items-center p-3 border-t border-slate-100">
+                    <span className="text-xs text-slate-500">
+                      Showing {(page - 1) * rowsPerPage + 1} to{" "}
+                      {Math.min(page * rowsPerPage, filteredZonesList.length)} of {filteredZonesList.length}
+                    </span>
+                    <Pagination
+                      isCompact
+                      showControls
+                      color="primary"
+                      page={page}
+                      total={totalPages}
+                      onChange={(p) => setPage(p)}
+                    />
+                  </div>
+                ) : null
+              }
+            >
               <TableHeader>
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400">ZONE NAME</TableColumn>
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400">STATE JURISDICTION</TableColumn>
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400">HEADQUARTERS</TableColumn>
               </TableHeader>
               <TableBody
-                items={zones.filter((z) => z.zoneName?.toLowerCase().includes(searchQuery.toLowerCase()))}
-                isLoading={loading}
-                emptyContent="No administrative zones found"
+                items={paginatedZones}
+                emptyContent={
+                  loading ? (
+                    <div className="py-6 flex justify-center items-center gap-2 text-slate-500">
+                      <Spinner size="sm" /> Loading administrative zones...
+                    </div>
+                  ) : (
+                    "No administrative zones found"
+                  )
+                }
               >
                 {(item) => (
                   <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
                     <TableCell className="text-xs font-bold text-slate-900">{item.zoneName}</TableCell>
-                    <TableCell className="text-xs text-slate-700">{item.stateId?.stateName || "--"}</TableCell>
+                    <TableCell className="text-xs text-slate-700">
+                      {typeof item.stateId === "object" ? (item.stateId as any)?.stateName : "--"}
+                    </TableCell>
                     <TableCell className="text-xs text-slate-500">{item.headquarters || "--"}</TableCell>
                   </TableRow>
                 )}
@@ -328,7 +585,29 @@ export default function LocationMasterPage() {
           )}
 
           {activeTab === "states" && (
-            <Table removeWrapper aria-label="State table" className="min-w-full">
+            <Table
+              removeWrapper
+              aria-label="State table"
+              className="min-w-full"
+              bottomContent={
+                totalPages > 1 ? (
+                  <div className="flex w-full justify-between items-center p-3 border-t border-slate-100">
+                    <span className="text-xs text-slate-500">
+                      Showing {(page - 1) * rowsPerPage + 1} to{" "}
+                      {Math.min(page * rowsPerPage, filteredStatesList.length)} of {filteredStatesList.length}
+                    </span>
+                    <Pagination
+                      isCompact
+                      showControls
+                      color="primary"
+                      page={page}
+                      total={totalPages}
+                      onChange={(p) => setPage(p)}
+                    />
+                  </div>
+                ) : null
+              }
+            >
               <TableHeader>
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400">STATE NAME</TableColumn>
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400">STATE CODE</TableColumn>
@@ -336,9 +615,16 @@ export default function LocationMasterPage() {
                 <TableColumn className="text-[10px] font-bold uppercase text-slate-400 text-center">ACTION</TableColumn>
               </TableHeader>
               <TableBody
-                items={states.filter((s) => s.stateName?.toLowerCase().includes(searchQuery.toLowerCase()))}
-                isLoading={loading}
-                emptyContent="No states registered"
+                items={paginatedStates}
+                emptyContent={
+                  loading ? (
+                    <div className="py-6 flex justify-center items-center gap-2 text-slate-500">
+                      <Spinner size="sm" /> Loading states...
+                    </div>
+                  ) : (
+                    "No states registered"
+                  )
+                }
               >
                 {(item) => (
                   <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
@@ -364,7 +650,7 @@ export default function LocationMasterPage() {
         </CardBody>
       </Card>
 
-      {/* Add Modal */}
+      {/* 3. Add Modal with React Hook Form & Zod */}
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
@@ -375,148 +661,281 @@ export default function LocationMasterPage() {
               </ModalHeader>
               <ModalBody className="space-y-3">
                 {activeTab === "states" && (
-                  <>
-                    <Input
-                      size="sm"
-                      label="State Name"
-                      placeholder="e.g. Uttar Pradesh"
-                      value={formData.stateName || ""}
-                      onValueChange={(v) => setFormData({ ...formData, stateName: v })}
-                      isRequired
+                  <form id="state-form" onSubmit={handleStateSubmit(onAddState)} className="space-y-3">
+                    <Controller
+                      name="stateName"
+                      control={stateControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            State Name <span className="text-red-500">*</span>
+                          </label>
+                          <Input
+                            {...field}
+                            size="sm"
+                            placeholder="e.g. Uttar Pradesh"
+                            isInvalid={!!stateErrors.stateName}
+                            errorMessage={stateErrors.stateName?.message}
+                          />
+                        </div>
+                      )}
                     />
-                    <Input
-                      size="sm"
-                      label="State Code (2-Letter ISO)"
-                      placeholder="e.g. UP"
-                      value={formData.stateCode || ""}
-                      onValueChange={(v) => setFormData({ ...formData, stateCode: v })}
-                      isRequired
+                    <Controller
+                      name="stateCode"
+                      control={stateControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            State Code (2-Letter ISO) <span className="text-red-500">*</span>
+                          </label>
+                          <Input
+                            {...field}
+                            size="sm"
+                            placeholder="e.g. UP"
+                            isInvalid={!!stateErrors.stateCode}
+                            errorMessage={stateErrors.stateCode?.message}
+                          />
+                        </div>
+                      )}
                     />
-                  </>
+                  </form>
                 )}
 
                 {activeTab === "zones" && (
-                  <>
-                    <Select
-                      size="sm"
-                      label="Select State"
-                      selectedKeys={formData.stateId ? [formData.stateId] : []}
-                      onChange={(e) => setFormData({ ...formData, stateId: e.target.value })}
-                      isRequired
-                    >
-                      {states.map((s) => (
-                        <SelectItem key={s._id} value={s._id}>{s.stateName}</SelectItem>
-                      ))}
-                    </Select>
-                    <Input
-                      size="sm"
-                      label="Zone Name"
-                      placeholder="e.g. Lucknow Zone"
-                      value={formData.zoneName || ""}
-                      onValueChange={(v) => setFormData({ ...formData, zoneName: v })}
-                      isRequired
+                  <form id="zone-form" onSubmit={handleZoneSubmit(onAddZone)} className="space-y-3">
+                    <Controller
+                      name="stateId"
+                      control={zoneControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            Select State <span className="text-red-500">*</span>
+                          </label>
+                          <Select
+                            size="sm"
+                            items={stateSelectItems}
+                            selectedKeys={field.value ? [field.value] : []}
+                            onChange={(e) => field.onChange(e.target.value)}
+                            isInvalid={!!zoneErrors.stateId}
+                            errorMessage={zoneErrors.stateId?.message}
+                          >
+                            {(s) => <SelectItem key={s.key}>{s.label}</SelectItem>}
+                          </Select>
+                        </div>
+                      )}
                     />
-                    <Input
-                      size="sm"
-                      label="Headquarters"
-                      placeholder="e.g. Lucknow"
-                      value={formData.headquarters || ""}
-                      onValueChange={(v) => setFormData({ ...formData, headquarters: v })}
+                    <Controller
+                      name="zoneName"
+                      control={zoneControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            Zone Name <span className="text-red-500">*</span>
+                          </label>
+                          <Input
+                            {...field}
+                            size="sm"
+                            placeholder="e.g. Lucknow Zone"
+                            isInvalid={!!zoneErrors.zoneName}
+                            errorMessage={zoneErrors.zoneName?.message}
+                          />
+                        </div>
+                      )}
                     />
-                  </>
+                    <Controller
+                      name="headquarters"
+                      control={zoneControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            Headquarters
+                          </label>
+                          <Input
+                            {...field}
+                            size="sm"
+                            placeholder="e.g. Lucknow"
+                          />
+                        </div>
+                      )}
+                    />
+                  </form>
                 )}
 
                 {activeTab === "ranges" && (
-                  <>
-                    <Select
-                      size="sm"
-                      label="Select State"
-                      selectedKeys={formData.stateId ? [formData.stateId] : []}
-                      onChange={(e) => setFormData({ ...formData, stateId: e.target.value, zoneId: "" })}
-                      isRequired
-                    >
-                      {states.map((s) => (
-                        <SelectItem key={s._id} value={s._id}>{s.stateName}</SelectItem>
-                      ))}
-                    </Select>
-                    <Select
-                      size="sm"
-                      label="Select Zone"
-                      selectedKeys={formData.zoneId ? [formData.zoneId] : []}
-                      onChange={(e) => setFormData({ ...formData, zoneId: e.target.value })}
-                      isRequired
-                    >
-                      {filteredZones.map((z) => (
-                        <SelectItem key={z._id} value={z._id}>{z.zoneName}</SelectItem>
-                      ))}
-                    </Select>
-                    <Input
-                      size="sm"
-                      label="Range Name"
-                      placeholder="e.g. Lucknow Range"
-                      value={formData.rangeName || ""}
-                      onValueChange={(v) => setFormData({ ...formData, rangeName: v })}
-                      isRequired
+                  <form id="range-form" onSubmit={handleRangeSubmit(onAddRange)} className="space-y-3">
+                    <Controller
+                      name="stateId"
+                      control={rangeControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            Select State <span className="text-red-500">*</span>
+                          </label>
+                          <Select
+                            size="sm"
+                            items={stateSelectItems}
+                            selectedKeys={field.value ? [field.value] : []}
+                            onChange={(e) => {
+                              field.onChange(e.target.value);
+                              setRangeValue("zoneId", "");
+                            }}
+                            isInvalid={!!rangeErrors.stateId}
+                            errorMessage={rangeErrors.stateId?.message}
+                          >
+                            {(s) => <SelectItem key={s.key}>{s.label}</SelectItem>}
+                          </Select>
+                        </div>
+                      )}
                     />
-                  </>
+                    <Controller
+                      name="zoneId"
+                      control={rangeControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            Select Parent Zone <span className="text-red-500">*</span>
+                          </label>
+                          <Select
+                            size="sm"
+                            items={availableZonesForRange}
+                            selectedKeys={field.value ? [field.value] : []}
+                            onChange={(e) => field.onChange(e.target.value)}
+                            isInvalid={!!rangeErrors.zoneId}
+                            errorMessage={rangeErrors.zoneId?.message}
+                            isDisabled={availableZonesForRange.length === 0}
+                          >
+                            {(z) => <SelectItem key={z.key}>{z.label}</SelectItem>}
+                          </Select>
+                        </div>
+                      )}
+                    />
+                    <Controller
+                      name="rangeName"
+                      control={rangeControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            Range Name <span className="text-red-500">*</span>
+                          </label>
+                          <Input
+                            {...field}
+                            size="sm"
+                            placeholder="e.g. Lucknow Range"
+                            isInvalid={!!rangeErrors.rangeName}
+                            errorMessage={rangeErrors.rangeName?.message}
+                          />
+                        </div>
+                      )}
+                    />
+                  </form>
                 )}
 
                 {activeTab === "districts" && (
-                  <>
-                    <Select
-                      size="sm"
-                      label="Select State"
-                      selectedKeys={formData.stateId ? [formData.stateId] : []}
-                      onChange={(e) => setFormData({ ...formData, stateId: e.target.value, zoneId: "", rangeId: "" })}
-                      isRequired
-                    >
-                      {states.map((s) => (
-                        <SelectItem key={s._id} value={s._id}>{s.stateName}</SelectItem>
-                      ))}
-                    </Select>
-                    <Select
-                      size="sm"
-                      label="Select Zone"
-                      selectedKeys={formData.zoneId ? [formData.zoneId] : []}
-                      onChange={(e) => setFormData({ ...formData, zoneId: e.target.value, rangeId: "" })}
-                      isRequired
-                    >
-                      {filteredZones.map((z) => (
-                        <SelectItem key={z._id} value={z._id}>{z.zoneName}</SelectItem>
-                      ))}
-                    </Select>
-                    <Select
-                      size="sm"
-                      label="Select Police Range"
-                      selectedKeys={formData.rangeId ? [formData.rangeId] : []}
-                      onChange={(e) => setFormData({ ...formData, rangeId: e.target.value })}
-                      isRequired
-                    >
-                      {filteredRanges.map((r) => (
-                        <SelectItem key={r._id} value={r._id}>{r.rangeName}</SelectItem>
-                      ))}
-                    </Select>
-                    <Input
-                      size="sm"
-                      label="District Name"
-                      placeholder="e.g. Lucknow"
-                      value={formData.districtName || ""}
-                      onValueChange={(v) => setFormData({ ...formData, districtName: v })}
-                      isRequired
+                  <form id="district-form" onSubmit={handleDistrictSubmit(onAddDistrict)} className="space-y-3">
+                    <Controller
+                      name="stateId"
+                      control={districtControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            Select State <span className="text-red-500">*</span>
+                          </label>
+                          <Select
+                            size="sm"
+                            items={stateSelectItems}
+                            selectedKeys={field.value ? [field.value] : []}
+                            onChange={(e) => {
+                              field.onChange(e.target.value);
+                              setDistrictValue("zoneId", "");
+                              setDistrictValue("rangeId", "");
+                            }}
+                            isInvalid={!!districtErrors.stateId}
+                            errorMessage={districtErrors.stateId?.message}
+                          >
+                            {(s) => <SelectItem key={s.key}>{s.label}</SelectItem>}
+                          </Select>
+                        </div>
+                      )}
                     />
-                  </>
+                    <Controller
+                      name="zoneId"
+                      control={districtControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            Select Zone <span className="text-red-500">*</span>
+                          </label>
+                          <Select
+                            size="sm"
+                            items={availableZonesForDistrict}
+                            selectedKeys={field.value ? [field.value] : []}
+                            onChange={(e) => {
+                              field.onChange(e.target.value);
+                              setDistrictValue("rangeId", "");
+                            }}
+                            isInvalid={!!districtErrors.zoneId}
+                            errorMessage={districtErrors.zoneId?.message}
+                            isDisabled={availableZonesForDistrict.length === 0}
+                          >
+                            {(z) => <SelectItem key={z.key}>{z.label}</SelectItem>}
+                          </Select>
+                        </div>
+                      )}
+                    />
+                    <Controller
+                      name="rangeId"
+                      control={districtControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            Select Police Range <span className="text-red-500">*</span>
+                          </label>
+                          <Select
+                            size="sm"
+                            items={availableRangesForDistrict}
+                            selectedKeys={field.value ? [field.value] : []}
+                            onChange={(e) => field.onChange(e.target.value)}
+                            isInvalid={!!districtErrors.rangeId}
+                            errorMessage={districtErrors.rangeId?.message}
+                            isDisabled={availableRangesForDistrict.length === 0}
+                          >
+                            {(r) => <SelectItem key={r.key}>{r.label}</SelectItem>}
+                          </Select>
+                        </div>
+                      )}
+                    />
+                    <Controller
+                      name="districtName"
+                      control={districtControl}
+                      render={({ field }) => (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-700 block mb-1">
+                            District Name <span className="text-red-500">*</span>
+                          </label>
+                          <Input
+                            {...field}
+                            size="sm"
+                            placeholder="e.g. Lucknow"
+                            isInvalid={!!districtErrors.districtName}
+                            errorMessage={districtErrors.districtName?.message}
+                          />
+                        </div>
+                      )}
+                    />
+                  </form>
                 )}
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button
                   size="sm"
+                  type="submit"
+                  form={`${activeTab.slice(0, -1)}-form`}
                   radius="sm"
                   className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
                   isLoading={isSubmitting}
-                  onClick={handleSubmitAdd}
                 >
                   Save Record
                 </Button>
@@ -526,7 +945,7 @@ export default function LocationMasterPage() {
         </ModalContent>
       </Modal>
 
-      {/* Delete Confirmation Modal */}
+      {/* 4. Delete Confirmation Modal */}
       <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
         <ModalContent>
           {(onClose) => (
@@ -539,7 +958,7 @@ export default function LocationMasterPage() {
                 Are you sure you want to remove <b>{itemToDelete?.districtName || itemToDelete?.stateName}</b>? Dockets linked to this record might be affected.
               </ModalBody>
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
                   Cancel
                 </Button>
                 <Button

@@ -26,35 +26,19 @@ import {
   Spinner,
 } from "@nextui-org/react";
 import Link from "next/link";
-import { useForm, Controller, SubmitHandler } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
 
 import { MastersAPI } from "@/api/mastersApi";
-import { z } from "zod";
+import { actionMappingSchema, ActionMappingFormValues } from "@/schemas/masterSchema";
+import { IActionMappingItem } from "@/types/master.types";
 
-const actionMappingFormSchema = z.object({
-  courtDecision: z.string().min(2, "Court decision is required").trim(),
-  actionStatus: z.string().min(2, "Action status is required").trim(),
-  actionNotTaken: z.string().min(2, "Action not taken text is required").trim(),
-  requiresComplianceDeadline: z.boolean(),
-  defaultDeadlineDays: z.number().int().min(0),
-  impactScope: z.string().min(1, "Impact scope is required"),
-});
-
-type ActionMappingFormValues = z.infer<typeof actionMappingFormSchema>;
-
-interface IActionMappingItem {
-  _id: string;
-  courtDecision: string;
-  actionStatus: string;
-  actionNotTaken: string;
-  requiresComplianceDeadline: boolean;
-  defaultDeadlineDays: number;
-  impactScope: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
+const COMPLIANCE_FILTER_ITEMS = [
+  { key: "ALL", label: "All Decision Outcomes" },
+  { key: "TIME_BOUND", label: "Time-Bound (Contempt Risk)" },
+  { key: "NO_DEADLINE", label: "Non-Time Bound / Closed" },
+];
 
 export default function ActionTakenMasterPage() {
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
@@ -77,10 +61,11 @@ export default function ActionTakenMasterPage() {
     control: addControl,
     handleSubmit: handleAddSubmit,
     watch: watchAddForm,
+    setValue: setAddValue,
     reset: resetAddForm,
     formState: { errors: addErrors },
   } = useForm<ActionMappingFormValues>({
-    resolver: zodResolver(actionMappingFormSchema),
+    resolver: zodResolver(actionMappingSchema) as any,
     defaultValues: {
       courtDecision: "",
       actionStatus: "",
@@ -95,10 +80,11 @@ export default function ActionTakenMasterPage() {
     control: editControl,
     handleSubmit: handleEditSubmit,
     watch: watchEditForm,
+    setValue: setEditValue,
     reset: resetEditForm,
     formState: { errors: editErrors },
   } = useForm<ActionMappingFormValues>({
-    resolver: zodResolver(actionMappingFormSchema),
+    resolver: zodResolver(actionMappingSchema) as any,
     defaultValues: {
       courtDecision: "",
       actionStatus: "",
@@ -115,11 +101,9 @@ export default function ActionTakenMasterPage() {
   const fetchActionMappings = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await MastersAPI.getActionMappings();
-      if (res && res.success && Array.isArray(res.data)) {
+      const res = await MastersAPI.getActionMappings({ limit: 100 });
+      if (res?.success && Array.isArray(res.data)) {
         setActionsList(res.data);
-      } else if (Array.isArray(res)) {
-        setActionsList(res);
       }
     } catch (err: any) {
       toast.error(err?.response?.data?.message || "Failed to load legal action mapping rules");
@@ -132,7 +116,8 @@ export default function ActionTakenMasterPage() {
     fetchActionMappings();
   }, [fetchActionMappings]);
 
-  const onAddRule: SubmitHandler<ActionMappingFormValues> = async (values) => {
+  // Submit Add
+  const onAddRule = async (values: ActionMappingFormValues) => {
     try {
       setSubmitting(true);
       const payload = {
@@ -158,6 +143,7 @@ export default function ActionTakenMasterPage() {
     }
   };
 
+  // Open Edit Modal
   const handleOpenEdit = (item: IActionMappingItem) => {
     setEditingItem(item);
     resetEditForm({
@@ -171,23 +157,25 @@ export default function ActionTakenMasterPage() {
     onEditOpen();
   };
 
-  const onUpdateRule: SubmitHandler<ActionMappingFormValues> = async (values) => {
+  // Submit Edit with Backend Call
+  const onUpdateRule = async (values: ActionMappingFormValues) => {
     if (!editingItem) return;
     try {
       setSubmitting(true);
       const updatedPayload = {
+        _id: editingItem._id,
         ...values,
         defaultDeadlineDays: values.requiresComplianceDeadline
           ? Number(values.defaultDeadlineDays) || 30
           : 0,
       };
 
-      setActionsList((prev) =>
-        prev.map((a) => (a._id === editingItem._id ? { ...a, ...updatedPayload } : a))
-      );
+      await MastersAPI.createActionMapping(updatedPayload);
+
       toast.success("Action mapping rule updated successfully");
       onEditOpenChange();
       setEditingItem(null);
+      fetchActionMappings();
     } catch (err: any) {
       toast.error(err?.response?.data?.message || "Failed to update action rule");
     } finally {
@@ -195,11 +183,13 @@ export default function ActionTakenMasterPage() {
     }
   };
 
+  // Open Delete Modal
   const handleOpenDelete = (item: IActionMappingItem) => {
     setItemToDelete(item);
     onDeleteOpen();
   };
 
+  // Confirm Delete
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
     try {
@@ -215,13 +205,14 @@ export default function ActionTakenMasterPage() {
     }
   };
 
+  // Search & Status Filter
   const filteredActions = useMemo(() => {
     return actionsList.filter((item) => {
       const matchesSearch =
         item.courtDecision?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.actionStatus?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.actionNotTaken?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.impactScope?.toLowerCase().includes(searchQuery.toLowerCase());
+        (item.impactScope && item.impactScope.toLowerCase().includes(searchQuery.toLowerCase()));
 
       const matchesDeadline =
         selectedDeadlineFilter === "ALL" ||
@@ -252,7 +243,7 @@ export default function ActionTakenMasterPage() {
                   </Button>
                 </Link>
                 <h1 className="text-base font-bold text-slate-900">
-                  6.9 Legal Action Taken Mapping Master
+                  7.9 Legal Action Taken Mapping Master
                 </h1>
                 <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
                   {actionsList.length} Judicial-to-Board Rules
@@ -268,7 +259,14 @@ export default function ActionTakenMasterPage() {
               className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
               startContent={<span className="material-symbols-rounded text-sm">add</span>}
               onPress={() => {
-                resetAddForm();
+                resetAddForm({
+                  courtDecision: "",
+                  actionStatus: "",
+                  actionNotTaken: "",
+                  requiresComplianceDeadline: false,
+                  defaultDeadlineDays: 0,
+                  impactScope: "Standard Workflow",
+                });
                 onAddOpen();
               }}
             >
@@ -295,6 +293,7 @@ export default function ActionTakenMasterPage() {
               radius="sm"
               aria-label="Filter by Compliance Type"
               placeholder="Filter by Compliance Type"
+              items={COMPLIANCE_FILTER_ITEMS}
               selectedKeys={[selectedDeadlineFilter]}
               onChange={(e) => {
                 setSelectedDeadlineFilter(e.target.value || "ALL");
@@ -302,9 +301,7 @@ export default function ActionTakenMasterPage() {
               }}
               className="bg-slate-50 font-semibold"
             >
-              <SelectItem key="ALL">All Decision Outcomes</SelectItem>
-              <SelectItem key="TIME_BOUND">Time-Bound (Contempt Risk)</SelectItem>
-              <SelectItem key="NO_DEADLINE">Non-Time Bound / Closed</SelectItem>
+              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
             </Select>
           </div>
         </CardBody>
@@ -316,7 +313,7 @@ export default function ActionTakenMasterPage() {
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
             Configured Judicial-To-Administrative State Machine ({filteredActions.length} Rules)
           </h3>
-          <span className="text-[11px] text-slate-400">Drives 5.0 Directives, Stays & Contempt Engine</span>
+          <span className="text-[11px] text-slate-400">Drives 5.0 Directives, Stays &amp; Contempt Engine</span>
         </div>
 
         <CardBody className="p-0">
@@ -382,7 +379,7 @@ export default function ActionTakenMasterPage() {
                     <TableCell className="text-xs font-bold text-slate-400">{itemIndex}</TableCell>
                     <TableCell>
                       <p className="text-xs font-bold text-slate-900">{item.courtDecision}</p>
-                      <p className="text-[10px] text-slate-400 leading-tight">{item.impactScope}</p>
+                      <p className="text-[10px] text-slate-400 leading-tight">{item.impactScope || "Standard Workflow"}</p>
                     </TableCell>
                     <TableCell>
                       <Chip size="sm" variant="flat" color="success" className="text-xs font-semibold">
@@ -447,16 +444,18 @@ export default function ActionTakenMasterPage() {
                   name="courtDecision"
                   control={addControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Court Order Decision Outcome"
-                      labelPlacement="outside"
-                      placeholder="e.g. Allowed with Costs / Speaking Order"
-                      isInvalid={!!addErrors.courtDecision}
-                      errorMessage={addErrors.courtDecision?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Court Order Decision Outcome <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. Allowed with Costs / Speaking Order"
+                        isInvalid={!!addErrors.courtDecision}
+                        errorMessage={addErrors.courtDecision?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -464,16 +463,18 @@ export default function ActionTakenMasterPage() {
                   name="actionStatus"
                   control={addControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Board Action Taken Text (Complied Green Path)"
-                      labelPlacement="outside"
-                      placeholder="e.g. Cost Deposited & Order Complied"
-                      isInvalid={!!addErrors.actionStatus}
-                      errorMessage={addErrors.actionStatus?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Board Action Taken Text (Complied Green Path) <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. Cost Deposited & Order Complied"
+                        isInvalid={!!addErrors.actionStatus}
+                        errorMessage={addErrors.actionStatus?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -481,16 +482,18 @@ export default function ActionTakenMasterPage() {
                   name="actionNotTaken"
                   control={addControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Action Not Taken Alert Text (Non-Complied Red Path)"
-                      labelPlacement="outside"
-                      placeholder="e.g. Compliance Overdue / Contempt Imminent"
-                      isInvalid={!!addErrors.actionNotTaken}
-                      errorMessage={addErrors.actionNotTaken?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Action Not Taken Alert Text (Non-Complied Red Path) <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. Compliance Overdue / Contempt Imminent"
+                        isInvalid={!!addErrors.actionNotTaken}
+                        errorMessage={addErrors.actionNotTaken?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -498,16 +501,18 @@ export default function ActionTakenMasterPage() {
                   name="impactScope"
                   control={addControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Institutional Impact Scope"
-                      labelPlacement="outside"
-                      placeholder="e.g. Requires departmental compliance within statutory window"
-                      isInvalid={!!addErrors.impactScope}
-                      errorMessage={addErrors.impactScope?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Institutional Impact Scope <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. Requires departmental compliance within statutory window"
+                        isInvalid={!!addErrors.impactScope}
+                        errorMessage={addErrors.impactScope?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -523,7 +528,10 @@ export default function ActionTakenMasterPage() {
                       <Switch
                         size="sm"
                         isSelected={field.value}
-                        onValueChange={field.onChange}
+                        onValueChange={(val) => {
+                          field.onChange(val);
+                          if (!val) setAddValue("defaultDeadlineDays", 0);
+                        }}
                       />
                     )}
                   />
@@ -534,16 +542,19 @@ export default function ActionTakenMasterPage() {
                     name="defaultDeadlineDays"
                     control={addControl}
                     render={({ field }) => (
-                      <Input
-                        size="sm"
-                        label="Default Statutory Deadline (Days)"
-                        labelPlacement="outside"
-                        type="number"
-                        value={field.value !== undefined ? field.value.toString() : "30"}
-                        onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
-                        isInvalid={!!addErrors.defaultDeadlineDays}
-                        errorMessage={addErrors.defaultDeadlineDays?.message}
-                      />
+                      <div>
+                        <label className="text-xs font-semibold text-slate-700 block mb-1">
+                          Default Statutory Deadline (Days) <span className="text-red-500">*</span>
+                        </label>
+                        <Input
+                          size="sm"
+                          type="number"
+                          value={field.value !== undefined ? String(field.value) : "30"}
+                          onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                          isInvalid={!!addErrors.defaultDeadlineDays}
+                          errorMessage={addErrors.defaultDeadlineDays?.message}
+                        />
+                      </div>
                     )}
                   />
                 )}
@@ -581,15 +592,17 @@ export default function ActionTakenMasterPage() {
                   name="courtDecision"
                   control={editControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Court Decision Outcome"
-                      labelPlacement="outside"
-                      isInvalid={!!editErrors.courtDecision}
-                      errorMessage={editErrors.courtDecision?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Court Decision Outcome <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        isInvalid={!!editErrors.courtDecision}
+                        errorMessage={editErrors.courtDecision?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -597,15 +610,17 @@ export default function ActionTakenMasterPage() {
                   name="actionStatus"
                   control={editControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Board Action Taken Text"
-                      labelPlacement="outside"
-                      isInvalid={!!editErrors.actionStatus}
-                      errorMessage={editErrors.actionStatus?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Board Action Taken Text <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        isInvalid={!!editErrors.actionStatus}
+                        errorMessage={editErrors.actionStatus?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -613,15 +628,17 @@ export default function ActionTakenMasterPage() {
                   name="actionNotTaken"
                   control={editControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Action Not Taken Alert Text"
-                      labelPlacement="outside"
-                      isInvalid={!!editErrors.actionNotTaken}
-                      errorMessage={editErrors.actionNotTaken?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Action Not Taken Alert Text <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        isInvalid={!!editErrors.actionNotTaken}
+                        errorMessage={editErrors.actionNotTaken?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -629,15 +646,17 @@ export default function ActionTakenMasterPage() {
                   name="impactScope"
                   control={editControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Institutional Impact Scope"
-                      labelPlacement="outside"
-                      isInvalid={!!editErrors.impactScope}
-                      errorMessage={editErrors.impactScope?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Institutional Impact Scope <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        isInvalid={!!editErrors.impactScope}
+                        errorMessage={editErrors.impactScope?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -653,7 +672,10 @@ export default function ActionTakenMasterPage() {
                       <Switch
                         size="sm"
                         isSelected={field.value}
-                        onValueChange={field.onChange}
+                        onValueChange={(val) => {
+                          field.onChange(val);
+                          if (!val) setEditValue("defaultDeadlineDays", 0);
+                        }}
                       />
                     )}
                   />
@@ -664,16 +686,19 @@ export default function ActionTakenMasterPage() {
                     name="defaultDeadlineDays"
                     control={editControl}
                     render={({ field }) => (
-                      <Input
-                        size="sm"
-                        label="Default Deadline (Days)"
-                        labelPlacement="outside"
-                        type="number"
-                        value={field.value !== undefined ? field.value.toString() : "30"}
-                        onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
-                        isInvalid={!!editErrors.defaultDeadlineDays}
-                        errorMessage={editErrors.defaultDeadlineDays?.message}
-                      />
+                      <div>
+                        <label className="text-xs font-semibold text-slate-700 block mb-1">
+                          Default Deadline (Days) <span className="text-red-500">*</span>
+                        </label>
+                        <Input
+                          size="sm"
+                          type="number"
+                          value={field.value !== undefined ? String(field.value) : "30"}
+                          onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                          isInvalid={!!editErrors.defaultDeadlineDays}
+                          errorMessage={editErrors.defaultDeadlineDays?.message}
+                        />
+                      </div>
                     )}
                   />
                 )}
@@ -716,7 +741,6 @@ export default function ActionTakenMasterPage() {
                 <Button
                   size="sm"
                   radius="sm"
-                  isLoading={submitting}
                   className="bg-rose-600 font-semibold text-white hover:bg-rose-700"
                   onClick={handleConfirmDelete}
                 >

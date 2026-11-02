@@ -30,37 +30,22 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
 
 import { MastersAPI } from "@/api/mastersApi";
-import { z } from "zod";
+import {
+  respondentGroupSchema,
+  RespondentGroupFormValues,
+} from "@/schemas/masterSchema";
+import { IRespondentGroupItem } from "@/types/master.types";
 
-const respondentGroupFormSchema = z.object({
-  groupName: z
-    .string()
-    .min(2, "Respondent group code must be at least 2 characters")
-    .max(100, "Group code is too long")
-    .transform((val) => val.trim().toUpperCase()),
-  defaultRankTitle: z
-    .string()
-    .min(2, "Official title must be at least 2 characters")
-    .max(150, "Title is too long")
-    .transform((val) => val.trim()),
-  defaultAddress: z
-    .string()
-    .min(5, "Official service address must be at least 5 characters")
-    .transform((val) => val.trim()),
-  isOurOffice: z.boolean(),
-});
+const ORG_TYPE_FILTER_ITEMS = [
+  { key: "ALL", label: "All Organization Types" },
+  { key: "OUR_OFFICE", label: "Our Institution (Direct Board Office)" },
+  { key: "STATE", label: "State Respondent / External Department" },
+];
 
-type RespondentGroupFormValues = z.infer<typeof respondentGroupFormSchema>;
-
-interface IRespondentGroupItem {
-  _id: string;
-  groupName: string;
-  defaultRankTitle: string;
-  defaultAddress: string;
-  isOurOffice: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-}
+const ORG_CLASSIFICATION_OPTIONS = [
+  { key: "false", label: "State Respondent / External Department" },
+  { key: "true", label: "Our Institution (Direct Board Office)" },
+];
 
 export default function RespondentsMasterPage() {
   const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
@@ -85,7 +70,7 @@ export default function RespondentsMasterPage() {
     reset: resetAddForm,
     formState: { errors: addErrors },
   } = useForm<RespondentGroupFormValues>({
-    resolver: zodResolver(respondentGroupFormSchema),
+    resolver: zodResolver(respondentGroupSchema) as any,
     defaultValues: {
       groupName: "",
       defaultRankTitle: "",
@@ -100,7 +85,7 @@ export default function RespondentsMasterPage() {
     reset: resetEditForm,
     formState: { errors: editErrors },
   } = useForm<RespondentGroupFormValues>({
-    resolver: zodResolver(respondentGroupFormSchema),
+    resolver: zodResolver(respondentGroupSchema) as any,
     defaultValues: {
       groupName: "",
       defaultRankTitle: "",
@@ -112,11 +97,9 @@ export default function RespondentsMasterPage() {
   const fetchRespondentGroups = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await MastersAPI.getRespondentGroups();
-      if (res && res.success && Array.isArray(res.data)) {
+      const res = await MastersAPI.getRespondentGroups({ limit: 100 });
+      if (res?.success && Array.isArray(res.data)) {
         setRespondents(res.data);
-      } else if (Array.isArray(res)) {
-        setRespondents(res);
       }
     } catch (err: any) {
       toast.error(err?.response?.data?.message || "Failed to load respondent groups");
@@ -163,12 +146,15 @@ export default function RespondentsMasterPage() {
     if (!editingItem) return;
     try {
       setSubmitting(true);
-      setRespondents((prev) =>
-        prev.map((r) => (r._id === editingItem._id ? { ...r, ...values } : r))
-      );
-      toast.success("Group configuration updated");
+      const payload = {
+        _id: editingItem._id,
+        ...values,
+      };
+      await MastersAPI.createRespondentGroup(payload);
+      toast.success("Respondent group updated successfully");
       onEditOpenChange();
       setEditingItem(null);
+      fetchRespondentGroups();
     } catch (err: any) {
       toast.error(err?.response?.data?.message || "Failed to update respondent group");
     } finally {
@@ -220,6 +206,7 @@ export default function RespondentsMasterPage() {
 
   return (
     <div className="space-y-4">
+      {/* 1. Header Information Bar */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -231,7 +218,7 @@ export default function RespondentsMasterPage() {
                   </Button>
                 </Link>
                 <h1 className="text-base font-bold text-slate-900">
-                  6.8 Respondent Groups & Opposite Parties Master
+                  7.8 Respondent Groups & Opposite Parties Master
                 </h1>
                 <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
                   {respondents.length} Groups Configured
@@ -247,7 +234,12 @@ export default function RespondentsMasterPage() {
               className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
               startContent={<span className="material-symbols-rounded text-sm">add</span>}
               onPress={() => {
-                resetAddForm();
+                resetAddForm({
+                  groupName: "",
+                  defaultRankTitle: "",
+                  defaultAddress: "",
+                  isOurOffice: false,
+                });
                 onAddOpen();
               }}
             >
@@ -255,6 +247,7 @@ export default function RespondentsMasterPage() {
             </Button>
           </div>
 
+          {/* Quick Filters */}
           <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
             <Input
               size="sm"
@@ -273,6 +266,7 @@ export default function RespondentsMasterPage() {
               radius="sm"
               aria-label="Filter by Organization Type"
               placeholder="Filter by Organization Type"
+              items={ORG_TYPE_FILTER_ITEMS}
               selectedKeys={[selectedTypeFilter]}
               onChange={(e) => {
                 setSelectedTypeFilter(e.target.value || "ALL");
@@ -280,14 +274,13 @@ export default function RespondentsMasterPage() {
               }}
               className="bg-slate-50 font-semibold"
             >
-              <SelectItem key="ALL">All Organization Types</SelectItem>
-              <SelectItem key="OUR_OFFICE">Our Institution (UPPRPB)</SelectItem>
-              <SelectItem key="STATE">State Respondent Depts</SelectItem>
+              {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
             </Select>
           </div>
         </CardBody>
       </Card>
 
+      {/* 2. Main Mappings Table */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
           <Table
@@ -396,6 +389,7 @@ export default function RespondentsMasterPage() {
         </CardBody>
       </Card>
 
+      {/* MODAL 1: Add Respondent Group */}
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top" size="lg">
         <ModalContent>
           {(onClose) => (
@@ -409,16 +403,18 @@ export default function RespondentsMasterPage() {
                   name="groupName"
                   control={addControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Respondent Group Code / Identifier"
-                      labelPlacement="outside"
-                      placeholder="e.g. HIGHER EDUCATION DEPT"
-                      isInvalid={!!addErrors.groupName}
-                      errorMessage={addErrors.groupName?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Respondent Group Code / Identifier <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. HIGHER EDUCATION DEPT"
+                        isInvalid={!!addErrors.groupName}
+                        errorMessage={addErrors.groupName?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -426,16 +422,18 @@ export default function RespondentsMasterPage() {
                   name="defaultRankTitle"
                   control={addControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Default Representative Official Title"
-                      labelPlacement="outside"
-                      placeholder="e.g. Principal Secretary (Higher Education)"
-                      isInvalid={!!addErrors.defaultRankTitle}
-                      errorMessage={addErrors.defaultRankTitle?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Default Representative Official Title <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. Principal Secretary (Higher Education)"
+                        isInvalid={!!addErrors.defaultRankTitle}
+                        errorMessage={addErrors.defaultRankTitle?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -443,16 +441,18 @@ export default function RespondentsMasterPage() {
                   name="defaultAddress"
                   control={addControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Official Service Postal Address"
-                      labelPlacement="outside"
-                      placeholder="e.g. Directorate Office, Prayagraj / Secretariat, Lucknow"
-                      isInvalid={!!addErrors.defaultAddress}
-                      errorMessage={addErrors.defaultAddress?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Official Service Postal Address <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        placeholder="e.g. Directorate Office, Prayagraj / Secretariat, Lucknow"
+                        isInvalid={!!addErrors.defaultAddress}
+                        errorMessage={addErrors.defaultAddress?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -460,17 +460,19 @@ export default function RespondentsMasterPage() {
                   name="isOurOffice"
                   control={addControl}
                   render={({ field }) => (
-                    <Select
-                      size="sm"
-                      label="Institutional Classification"
-                      labelPlacement="outside"
-                      selectedKeys={[field.value ? "true" : "false"]}
-                      onChange={(e) => field.onChange(e.target.value === "true")}
-                      isRequired
-                    >
-                      <SelectItem key="false">State Respondent / External Department</SelectItem>
-                      <SelectItem key="true">Our Institution (Direct Board Office)</SelectItem>
-                    </Select>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Institutional Classification <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={ORG_CLASSIFICATION_OPTIONS}
+                        selectedKeys={[field.value ? "true" : "false"]}
+                        onChange={(e) => field.onChange(e.target.value === "true")}
+                      >
+                        {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+                      </Select>
+                    </div>
                   )}
                 />
               </ModalBody>
@@ -493,6 +495,7 @@ export default function RespondentsMasterPage() {
         </ModalContent>
       </Modal>
 
+      {/* MODAL 2: Edit Respondent Group */}
       <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top" size="lg">
         <ModalContent>
           {(onClose) => (
@@ -506,15 +509,17 @@ export default function RespondentsMasterPage() {
                   name="groupName"
                   control={editControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Group Code Name"
-                      labelPlacement="outside"
-                      isInvalid={!!editErrors.groupName}
-                      errorMessage={editErrors.groupName?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Group Code Name <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        isInvalid={!!editErrors.groupName}
+                        errorMessage={editErrors.groupName?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -522,15 +527,17 @@ export default function RespondentsMasterPage() {
                   name="defaultRankTitle"
                   control={editControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Default Representative Title"
-                      labelPlacement="outside"
-                      isInvalid={!!editErrors.defaultRankTitle}
-                      errorMessage={editErrors.defaultRankTitle?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Default Representative Title <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        isInvalid={!!editErrors.defaultRankTitle}
+                        errorMessage={editErrors.defaultRankTitle?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -538,15 +545,17 @@ export default function RespondentsMasterPage() {
                   name="defaultAddress"
                   control={editControl}
                   render={({ field }) => (
-                    <Input
-                      {...field}
-                      size="sm"
-                      label="Official Service Address"
-                      labelPlacement="outside"
-                      isInvalid={!!editErrors.defaultAddress}
-                      errorMessage={editErrors.defaultAddress?.message}
-                      isRequired
-                    />
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Official Service Address <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        {...field}
+                        size="sm"
+                        isInvalid={!!editErrors.defaultAddress}
+                        errorMessage={editErrors.defaultAddress?.message}
+                      />
+                    </div>
                   )}
                 />
 
@@ -554,16 +563,19 @@ export default function RespondentsMasterPage() {
                   name="isOurOffice"
                   control={editControl}
                   render={({ field }) => (
-                    <Select
-                      size="sm"
-                      label="Classification"
-                      labelPlacement="outside"
-                      selectedKeys={[field.value ? "true" : "false"]}
-                      onChange={(e) => field.onChange(e.target.value === "true")}
-                    >
-                      <SelectItem key="false">State Respondent / External Department</SelectItem>
-                      <SelectItem key="true">Our Institution (Direct Board Office)</SelectItem>
-                    </Select>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 block mb-1">
+                        Classification <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        size="sm"
+                        items={ORG_CLASSIFICATION_OPTIONS}
+                        selectedKeys={[field.value ? "true" : "false"]}
+                        onChange={(e) => field.onChange(e.target.value === "true")}
+                      >
+                        {(item) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+                      </Select>
+                    </div>
                   )}
                 />
               </ModalBody>
@@ -586,6 +598,7 @@ export default function RespondentsMasterPage() {
         </ModalContent>
       </Modal>
 
+      {/* MODAL 3: Delete Confirmation */}
       <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
         <ModalContent>
           {(onClose) => (

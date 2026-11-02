@@ -13,6 +13,18 @@ import {
   DropdownItem,
   Tooltip,
   Skeleton,
+  Modal,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  useDisclosure,
+  Table,
+  TableHeader,
+  TableColumn,
+  TableBody,
+  TableRow,
+  TableCell,
 } from "@nextui-org/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -25,20 +37,26 @@ import {
   CourtForumItem,
   OicWorkloadItem,
   CalendarDayItem,
+  HearingDateCaseItem,
 } from "@/api/dashboardApi";
-import { CasesAPI } from "@/api/casesApi";
 
 export default function WritDashboardPage() {
   const router = useRouter();
+  const { isOpen: isDayModalOpen, onOpen: onDayModalOpen, onOpenChange: onDayModalOpenChange } = useDisclosure();
+
+  // Current System Date Context
+  const today = new Date();
+  const defaultYear = today.getFullYear();
+  const defaultMonth = today.getMonth(); // 0-indexed (e.g. 10 for November)
 
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
   const [selectedCourt, setSelectedCourt] = useState<string>("ALL");
-  const [selectedYear, setSelectedYear] = useState<string>("2026");
+  const [selectedYear, setSelectedYear] = useState<string>(String(defaultYear));
 
-  const [currentYear, setCurrentYear] = useState<number>(2026);
-  const [currentMonth, setCurrentMonth] = useState<number>(8); // 8 = September
+  const [currentYear, setCurrentYear] = useState<number>(defaultYear);
+  const [currentMonth, setCurrentMonth] = useState<number>(defaultMonth);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [lastSyncTime, setLastSyncTime] = useState<string>("Today, 13:20 IST");
+  const [isExportingMatrix, setIsExportingMatrix] = useState<boolean>(false);
 
   const [kpis, setKpis] = useState<any>(null);
   const [matrixRows, setMatrixRows] = useState<MatrixRowItem[]>([]);
@@ -47,10 +65,34 @@ export default function WritDashboardPage() {
   const [oicWorkload, setOicWorkload] = useState<OicWorkloadItem[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<Record<number, CalendarDayItem>>({});
 
+  // Calendar Day Drill-down state
+  const [selectedDateDetails, setSelectedDateDetails] = useState<string>("");
+  const [selectedDateCases, setSelectedDateCases] = useState<HearingDateCaseItem[]>([]);
+  const [loadingDateCases, setLoadingDateCases] = useState<boolean>(false);
+
   const [loadingKpis, setLoadingKpis] = useState<boolean>(true);
   const [loadingMatrix, setLoadingMatrix] = useState<boolean>(true);
   const [loadingCourts, setLoadingCourts] = useState<boolean>(true);
   const [loadingOic, setLoadingOic] = useState<boolean>(true);
+
+  // Dynamic Year List: 2010 to next year (2027)
+  const availableYears = useMemo(() => {
+    const startYear = 2010;
+    const endYear = defaultYear + 1;
+    const years: string[] = ["ALL"];
+    for (let y = endYear; y >= startYear; y--) {
+      years.push(String(y));
+    }
+    return years;
+  }, [defaultYear]);
+
+  // Dynamic Month Label for Matrix Table Header
+  const currentMonthLabel = useMemo(() => {
+    return new Date(currentYear, currentMonth, 1).toLocaleString("en-US", {
+      month: "short",
+      year: "2-digit",
+    });
+  }, [currentYear, currentMonth]);
 
   const loadKpis = useCallback(async () => {
     setLoadingKpis(true);
@@ -162,9 +204,22 @@ export default function WritDashboardPage() {
     return { monthName, days };
   }, [currentYear, currentMonth, calendarEvents]);
 
-  const handleCalendarClick = (dateStr: string | null, count: number | undefined) => {
+  // Calendar Click Handler: Opens in-app inspection modal
+  const handleCalendarClick = async (dateStr: string | null, count: number | undefined) => {
     if (!dateStr || !count || count === 0) return;
-    router.push(`/admin/cases?hearingDate=${dateStr}`);
+    setSelectedDateDetails(dateStr);
+    onDayModalOpen();
+    setLoadingDateCases(true);
+    try {
+      const res = await DashboardAPI.getCasesForHearingDate(dateStr);
+      if (res?.success) {
+        setSelectedDateCases(res.data || []);
+      }
+    } catch {
+      toast.error("Failed to load hearing dockets for selected date");
+    } finally {
+      setLoadingDateCases(false);
+    }
   };
 
   const handleCellClick = (caseType: string, statusKey: string) => {
@@ -175,19 +230,44 @@ export default function WritDashboardPage() {
     );
   };
 
+  const handleExportMatrix = async () => {
+    setIsExportingMatrix(true);
+    const toastId = toast.loading("Generating Institutional Writ Matrix PDF...");
+    try {
+      const htmlContent = await DashboardAPI.downloadMatrixPdf({
+        wing: selectedCategory,
+        courtCode: selectedCourt,
+        year: selectedYear !== "ALL" ? selectedYear : undefined,
+      });
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        toast.dismiss(toastId);
+        toast.error("Please allow popups to download Matrix PDF.");
+        return;
+      }
+      printWindow.document.open();
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      toast.success("Classification Matrix PDF exported successfully!", { id: toastId });
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      toast.error(err.response?.data?.message || "Failed to export Matrix PDF.");
+    } finally {
+      setIsExportingMatrix(false);
+    }
+  };
+
   const handleSyncNow = async () => {
     setIsSyncing(true);
     try {
       toast.loading("Querying eCourts CIS Gateways...", { id: "sync" });
       setTimeout(() => {
         setIsSyncing(false);
-        const now = new Date();
-        setLastSyncTime(`Today, ${now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })} IST`);
         toast.success("eCourts Gateway Synchronized!", { id: "sync" });
         loadKpis();
         loadMatrix();
         loadCalendar();
-      }, 1200);
+      }, 900);
     } catch {
       setIsSyncing(false);
       toast.error("Gateway sync timeout", { id: "sync" });
@@ -196,6 +276,7 @@ export default function WritDashboardPage() {
 
   return (
     <div className="space-y-5">
+      {/* 1. Top 4 High-Level KPI Cards (Pure Real Database Values - Zero Dummy Data) */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card shadow="none" className="border border-slate-200/80 bg-white">
           <CardBody className="p-4">
@@ -209,11 +290,11 @@ export default function WritDashboardPage() {
               <Skeleton className="h-8 w-24 my-2 rounded" />
             ) : (
               <h3 className="mt-2 text-3xl font-extrabold text-emerald-600">
-                {kpis?.activeWrits?.total ?? 553}
+                {kpis?.activeWrits?.total ?? 0}
               </h3>
             )}
             <p className="mt-1 text-xs text-slate-500">
-              {kpis?.activeWrits?.filedThisMonth ?? 127} filed this month · {kpis?.activeWrits?.previous ?? 426} previous
+              {kpis?.activeWrits?.filedThisMonth ?? 0} filed this month · {kpis?.activeWrits?.previous ?? 0} previous
             </p>
           </CardBody>
         </Card>
@@ -230,7 +311,7 @@ export default function WritDashboardPage() {
               <Skeleton className="h-8 w-24 my-2 rounded" />
             ) : (
               <h3 className="mt-2 text-3xl font-extrabold text-amber-500">
-                {kpis?.pendingInCourt?.total ?? 293}
+                {kpis?.pendingInCourt?.total ?? 0}
               </h3>
             )}
             <p className="mt-1 text-xs text-slate-500">
@@ -251,11 +332,11 @@ export default function WritDashboardPage() {
               <Skeleton className="h-8 w-24 my-2 rounded" />
             ) : (
               <h3 className="mt-2 text-3xl font-extrabold text-rose-500">
-                {kpis?.actionInBoard?.total ?? 88}
+                {kpis?.actionInBoard?.total ?? 0}
               </h3>
             )}
             <p className="mt-1 text-xs text-slate-500">
-              {kpis?.actionInBoard?.pwcAwaited ?? 49} PWC Awaited · {kpis?.actionInBoard?.toBeClosed ?? 172} to be closed
+              {kpis?.actionInBoard?.pwcAwaited ?? 0} PWC Awaited · {kpis?.actionInBoard?.toBeClosed ?? 0} to be closed
             </p>
           </CardBody>
         </Card>
@@ -272,12 +353,12 @@ export default function WritDashboardPage() {
               <Skeleton className="h-8 w-24 my-2 rounded" />
             ) : (
               <h3 className="mt-2 text-3xl font-extrabold text-blue-900">
-                {kpis?.complianceRate?.rate ?? 94.2}%
+                {kpis?.complianceRate?.rate ?? 0}%
               </h3>
             )}
             <Progress
               size="sm"
-              value={kpis?.complianceRate?.rate ?? 94.2}
+              value={kpis?.complianceRate?.rate ?? 0}
               color="primary"
               aria-label="Compliance target"
               className="mt-2"
@@ -286,8 +367,10 @@ export default function WritDashboardPage() {
         </Card>
       </div>
 
+      {/* 2. Multi-Dimensional Writ Classification Matrix */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-slate-50/50 px-5 py-3">
+          {/* Section Wing Tabs */}
           <div className="flex flex-wrap items-center gap-1.5">
             {[
               { key: "ALL", label: "ALL WRITS" },
@@ -311,6 +394,7 @@ export default function WritDashboardPage() {
             ))}
           </div>
 
+          {/* Master Filters (Court, 2010+ Year Dropdown, B&W Export) */}
           <div className="flex items-center gap-2">
             <Dropdown>
               <DropdownTrigger>
@@ -345,11 +429,14 @@ export default function WritDashboardPage() {
                   Year: {selectedYear}
                 </Button>
               </DropdownTrigger>
-              <DropdownMenu aria-label="Select Year" onAction={(key) => setSelectedYear(key as string)}>
-                <DropdownItem key="2026">2026</DropdownItem>
-                <DropdownItem key="2025">2025</DropdownItem>
-                <DropdownItem key="2024">2024</DropdownItem>
-                <DropdownItem key="ALL">All Years</DropdownItem>
+              <DropdownMenu
+                aria-label="Select Year"
+                className="max-h-64 overflow-y-auto"
+                onAction={(key) => setSelectedYear(key as string)}
+              >
+                {availableYears.map((yr) => (
+                  <DropdownItem key={yr}>{yr === "ALL" ? "All Years" : yr}</DropdownItem>
+                ))}
               </DropdownMenu>
             </Dropdown>
 
@@ -357,9 +444,10 @@ export default function WritDashboardPage() {
               size="sm"
               variant="bordered"
               radius="sm"
-              startContent={<span className="material-symbols-rounded text-sm text-slate-500">download</span>}
+              startContent={<span className="material-symbols-rounded text-sm text-blue-700">picture_as_pdf</span>}
               className="h-8 border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              onClick={() => toast.success("Exporting full matrix snapshot (.xlsx)...")}
+              isLoading={isExportingMatrix}
+              onClick={handleExportMatrix}
             >
               Export Matrix
             </Button>
@@ -391,7 +479,9 @@ export default function WritDashboardPage() {
               </tr>
               <tr className="border-b border-slate-200 bg-slate-50 text-[9px] font-bold uppercase text-slate-600">
                 <th className="border-r border-slate-200 p-2 text-center">Previous</th>
-                <th className="border-r border-slate-200 p-2 text-center">In Sep&apos;26</th>
+                <th className="border-r border-slate-200 p-2 text-center text-blue-900">
+                  IN {currentMonthLabel.toUpperCase()}
+                </th>
                 <th className="border-r border-slate-200 bg-rose-50 p-2 text-center font-extrabold text-slate-900">Total</th>
                 <th className="border-r border-slate-200 p-2 text-center">Closed</th>
                 <th className="border-r border-slate-200 p-2 text-center">To Be Closed</th>
@@ -518,8 +608,10 @@ export default function WritDashboardPage() {
         </CardBody>
       </Card>
 
+      {/* 3. Bottom Row: Left (Courts + OIC Workload) & Right (Interactive Heatmap Calendar) */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
+          {/* Judicial Forum Master Distribution */}
           <Card shadow="none" className="border border-slate-200/80 bg-white">
             <div className="flex items-center justify-between border-b border-slate-100 p-3.5">
               <div className="flex items-center gap-2">
@@ -559,6 +651,7 @@ export default function WritDashboardPage() {
             </CardBody>
           </Card>
 
+          {/* OIC Workload Table */}
           <Card shadow="none" className="border border-slate-200/80 bg-white">
             <div className="flex items-center justify-between border-b border-slate-100 p-3.5">
               <div className="flex items-center gap-2">
@@ -632,6 +725,7 @@ export default function WritDashboardPage() {
           </Card>
         </div>
 
+        {/* Right Column: Hearing Heatmap Calendar */}
         <div className="space-y-4">
           <Card shadow="none" className="border border-slate-200/80 bg-white">
             <div className="flex items-center justify-between border-b border-slate-100 p-3">
@@ -666,7 +760,6 @@ export default function WritDashboardPage() {
             </div>
 
             <CardBody className="p-3">
-              {/* Day Headings */}
               <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[10px] font-extrabold uppercase text-slate-400">
                 {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d, i) => (
                   <span key={d} className={i === 0 ? "text-rose-500" : ""}>
@@ -675,7 +768,6 @@ export default function WritDashboardPage() {
                 ))}
               </div>
 
-              {/* Day Cells Grid */}
               <div className="grid grid-cols-7 gap-1">
                 {miniCalendarData.days.map((item, idx) => {
                   if (item.dayNum === null) {
@@ -725,7 +817,7 @@ export default function WritDashboardPage() {
                               </p>
                             )}
                             <p className="text-[9px] font-medium text-blue-600 underline">
-                              Click to inspect docket list →
+                              Click to view all cases →
                             </p>
                           </div>
                         }
@@ -742,7 +834,7 @@ export default function WritDashboardPage() {
               <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 text-[10px] text-slate-500">
                 <span className="flex items-center gap-1">
                   <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
-                  Hover to view counts
+                  Click date to inspect cause list
                 </span>
                 <button
                   type="button"
@@ -756,6 +848,7 @@ export default function WritDashboardPage() {
             </CardBody>
           </Card>
 
+          {/* Operational Quick Links */}
           <Card shadow="none" className="border border-slate-200/80 bg-white">
             <CardBody className="p-3.5">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">Operational Desks</h4>
@@ -797,6 +890,121 @@ export default function WritDashboardPage() {
           </Card>
         </div>
       </div>
+
+      {/* 4. Calendar Hearing Date Click Drill-down Modal */}
+      <Modal isOpen={isDayModalOpen} onOpenChange={onDayModalOpenChange} size="4xl" placement="top">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="border-b border-slate-100 flex items-center justify-between py-3">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-rounded text-blue-700">event_available</span>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Scheduled Court Hearings for {selectedDateDetails}
+                    </h3>
+                    <p className="text-[10px] text-slate-400">
+                      Total: {selectedDateCases.length} Matters Listed in Cause-List
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mr-6">
+                  <Button
+                    size="sm"
+                    variant="bordered"
+                    radius="sm"
+                    className="text-xs h-7 border-slate-300"
+                    startContent={<span className="material-symbols-rounded text-sm">print</span>}
+                    onClick={() => window.print()}
+                  >
+                    Print Cause List
+                  </Button>
+                </div>
+              </ModalHeader>
+              <ModalBody className="p-0">
+                <Table removeWrapper aria-label="Day hearings table" className="min-w-full">
+                  <TableHeader>
+                    <TableColumn className="bg-transparent text-[10px] font-bold uppercase text-slate-400">
+                      DOCKET / WRIT NO.
+                    </TableColumn>
+                    <TableColumn className="bg-transparent text-[10px] font-bold uppercase text-slate-400">
+                      LEAD PETITIONER
+                    </TableColumn>
+                    <TableColumn className="bg-transparent text-[10px] font-bold uppercase text-slate-400">
+                      COURT &amp; ROOM
+                    </TableColumn>
+                    <TableColumn className="bg-transparent text-[10px] font-bold uppercase text-slate-400">
+                      STAGE / ADVOCATE
+                    </TableColumn>
+                    <TableColumn className="bg-transparent text-[10px] font-bold uppercase text-slate-400">
+                      ASSIGNED OIC
+                    </TableColumn>
+                    <TableColumn className="bg-transparent text-[10px] font-bold uppercase text-slate-400 text-center">
+                      ACTION
+                    </TableColumn>
+                  </TableHeader>
+                  <TableBody
+                    items={selectedDateCases}
+                    isLoading={loadingDateCases}
+                    loadingContent={
+                      <div className="p-4 space-y-2">
+                        <Skeleton className="h-6 w-full rounded" />
+                        <Skeleton className="h-6 w-full rounded" />
+                      </div>
+                    }
+                    emptyContent={!loadingDateCases ? "No matters scheduled on this date." : " "}
+                  >
+                    {(item: HearingDateCaseItem) => (
+                      <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                        <TableCell>
+                          <p className="font-mono text-xs font-bold text-slate-900">{item.fileNo}</p>
+                          <p className="text-[10px] text-blue-700 font-semibold">{item.writNumber || "Awaiting Allotment"}</p>
+                        </TableCell>
+                        <TableCell>
+                          <p className="text-xs font-semibold text-slate-900">{item.leadPetitioner}</p>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            {item.hasActiveStay && (
+                              <Chip size="sm" color="danger" variant="solid" className="text-[8px] h-3.5 px-1 font-bold">
+                                STAY
+                              </Chip>
+                            )}
+                            {item.isContemptNotice && (
+                              <Chip size="sm" color="danger" variant="solid" className="text-[8px] h-3.5 px-1 font-bold">
+                                CONTEMPT
+                              </Chip>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <p className="text-xs text-slate-800">{item.court}</p>
+                          <p className="text-[10px] text-slate-400">Room: {item.courtRoomNo || "Main Hall"}</p>
+                        </TableCell>
+                        <TableCell>
+                          <p className="text-xs font-medium text-slate-700">{item.stage || "Active Stage"}</p>
+                          <p className="text-[10px] text-slate-400">Adv: {item.petitionerAdvocate || "--"}</p>
+                        </TableCell>
+                        <TableCell className="text-xs text-slate-800 font-semibold">{item.assignedOIC || "--"}</TableCell>
+                        <TableCell className="text-center">
+                          <Link href={`/admin/cases/${item._id}`}>
+                            <Button size="sm" radius="sm" variant="bordered" className="text-[11px] h-7 border-slate-300">
+                              360° Dossier
+                            </Button>
+                          </Link>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </ModalBody>
+              <ModalFooter className="border-t border-slate-100 py-2.5">
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose}>
+                  Close
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
     </div>
   );
 }

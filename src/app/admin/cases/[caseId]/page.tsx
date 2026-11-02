@@ -23,6 +23,7 @@ import {
   Input,
   Select,
   SelectItem,
+  Textarea,
   useDisclosure,
   Skeleton,
 } from "@nextui-org/react";
@@ -31,6 +32,7 @@ import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import axiosClient from "@/api/axiosClient";
 import { CasesAPI } from "@/api/casesApi";
+import { CaseHearingHistoryItem } from "@/types/case.types";
 
 interface MovementRecord {
   _id: string;
@@ -56,15 +58,18 @@ export default function CaseDossier360Page() {
   // Modals
   const { isOpen: isAttachOpen, onOpen: onAttachOpen, onOpenChange: onAttachOpenChange } = useDisclosure();
   const { isOpen: isStatusOpen, onOpen: onStatusOpen, onOpenChange: onStatusOpenChange } = useDisclosure();
+  const { isOpen: isHearingOpen, onOpen: onHearingOpen, onOpenChange: onHearingOpenChange } = useDisclosure();
 
   // Data States
   const [caseData, setCaseData] = useState<any>(null);
   const [petitioners, setPetitioners] = useState<any[]>([]);
+  const [hearings, setHearings] = useState<CaseHearingHistoryItem[]>([]);
   const [movementHistory, setMovementHistory] = useState<MovementRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
   const [isAttaching, setIsAttaching] = useState<boolean>(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<boolean>(false);
+  const [isRecordingHearing, setIsRecordingHearing] = useState<boolean>(false);
 
   // Status Change Form State
   const [newStage, setNewStage] = useState<string>("");
@@ -76,7 +81,15 @@ export default function CaseDossier360Page() {
   const [newCnrNo, setNewCnrNo] = useState("");
   const [newPetitioner, setNewPetitioner] = useState("");
 
-  // 1. Fetch Case Dossier Master Data
+  // Record New Hearing Form State
+  const [hearingDate, setHearingDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [newNdoh, setNewNdoh] = useState<string>("");
+  const [courtRoomNo, setCourtRoomNo] = useState<string>("");
+  const [judgeCoram, setJudgeCoram] = useState<string>("");
+  const [orderType, setOrderType] = useState<string>("ADJOURNMENT");
+  const [businessRecorded, setBusinessRecorded] = useState<string>("");
+
+  // 1. Fetch Case Master Dossier + Hearings
   const fetchCaseDossier = useCallback(async () => {
     if (!caseId) return;
     setLoading(true);
@@ -85,8 +98,11 @@ export default function CaseDossier360Page() {
       if (res?.success) {
         setCaseData(res.case);
         setPetitioners(res.petitioners || []);
+        setHearings(res.hearings || []);
         setNewStage(res.case.stage || "Advance Notice Stage");
         setNewJudicialStatus(res.case.judicialStatus || "ACTIVE");
+        setCourtRoomNo(res.case.courtRoomNo || "--");
+        setJudgeCoram(res.case.coramBench || "--");
       }
     } catch (err: any) {
       console.error("Failed to load case dossier:", err);
@@ -96,7 +112,7 @@ export default function CaseDossier360Page() {
     }
   }, [caseId]);
 
-  // 2. Fetch File Movement & Hold History
+  // 2. Fetch File Movement & Custody History
   const fetchMovementHistory = useCallback(async () => {
     if (!caseId) return;
     setLoadingHistory(true);
@@ -145,6 +161,55 @@ export default function CaseDossier360Page() {
     }
   };
 
+  // Record Judicial Hearing Entry
+  const handleRecordHearing = async () => {
+    if (!hearingDate || !businessRecorded.trim()) {
+      toast.error("Hearing Date and Business Recorded description are mandatory");
+      return;
+    }
+
+    setIsRecordingHearing(true);
+    try {
+      const res = await CasesAPI.recordHearing(caseId, {
+        hearingDate,
+        ndoh: newNdoh || null,
+        courtRoomNo,
+        judgeCoram,
+        orderType,
+        businessRecorded,
+      });
+
+      if (res?.success) {
+        toast.success("Hearing proceedings recorded and next date updated!");
+        onHearingOpenChange();
+        setBusinessRecorded("");
+        setNewNdoh("");
+        fetchCaseDossier();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to record hearing");
+    } finally {
+      setIsRecordingHearing(false);
+    }
+  };
+
+  // Rollback Hearing Update
+  const handleRollbackHearing = async (historyId: string) => {
+    if (!confirm("Are you sure you want to revert this hearing date and stage back to previous snapshot?")) {
+      return;
+    }
+
+    try {
+      const res = await CasesAPI.rollbackHearing(historyId);
+      if (res?.success) {
+        toast.success("Hearing rolled back to previous snapshot successfully!");
+        fetchCaseDossier();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Failed to rollback hearing");
+    }
+  };
+
   // Handle Tagging Connected Writ
   const handleAttachWrit = async () => {
     if (!newWritNo.trim()) {
@@ -171,6 +236,30 @@ export default function CaseDossier360Page() {
       toast.error(err.response?.data?.message || "Failed to tag connected writ");
     } finally {
       setIsAttaching(false);
+    }
+  };
+
+  // Generate & Download Attractive Single Case Dossier PDF Sheet
+ const handleDownloadDossierPdf = async () => {
+    if (!caseId) return;
+    const toastId = toast.loading("Generating Official Dossier PDF Sheet...");
+    try {
+      const htmlContent = await CasesAPI.downloadCaseDossierPdf(caseId);
+      
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        toast.dismiss(toastId);
+        toast.error("Please enable popups to view the Dossier PDF.");
+        return;
+      }
+      
+      printWindow.document.open();
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      toast.success("Dossier Sheet rendered successfully!", { id: toastId });
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      toast.error(err.response?.data?.message || "Failed to download Dossier PDF.");
     }
   };
 
@@ -237,9 +326,15 @@ export default function CaseDossier360Page() {
                   CNR: {caseData.cnrNumber || "Unassigned"}
                 </Chip>
 
-                {caseData.syncStatus === "LIVE_SYNCED" && (
-                  <Chip size="sm" color="success" variant="flat" className="text-[10px] font-bold">
-                    🟢 Live CIS Synced
+                {caseData.hasActiveStay && (
+                  <Chip size="sm" color="danger" variant="solid" className="text-[10px] font-extrabold animate-pulse">
+                    ⚠️ Interim Stay Active
+                  </Chip>
+                )}
+
+                {caseData.isContemptNotice && (
+                  <Chip size="sm" color="danger" variant="flat" className="text-[10px] font-extrabold">
+                    🔴 Contempt Notice
                   </Chip>
                 )}
               </div>
@@ -254,12 +349,35 @@ export default function CaseDossier360Page() {
                 size="sm"
                 variant="bordered"
                 radius="sm"
+                className="border-slate-300 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50"
+                startContent={<span className="material-symbols-rounded text-sm text-blue-700">picture_as_pdf</span>}
+                onClick={handleDownloadDossierPdf}
+              >
+                Download Dossier PDF
+              </Button>
+
+              <Button
+                size="sm"
+                variant="bordered"
+                radius="sm"
+                className="border-slate-300 text-xs font-semibold text-slate-700 bg-white"
+                startContent={<span className="material-symbols-rounded text-sm text-blue-700">gavel</span>}
+                onPress={onHearingOpen}
+              >
+                Record Hearing
+              </Button>
+
+              <Button
+                size="sm"
+                variant="bordered"
+                radius="sm"
                 className="border-slate-300 text-xs font-semibold text-slate-700 bg-white"
                 startContent={<span className="material-symbols-rounded text-sm text-blue-700">published_with_changes</span>}
                 onPress={onStatusOpen}
               >
                 Change Stage
               </Button>
+
               <Link href={`/admin/cases/batch?caseId=${caseData._id}`}>
                 <Button
                   size="sm"
@@ -376,7 +494,116 @@ export default function CaseDossier360Page() {
               </div>
             </Tab>
 
-            {/* Tab 2: File Movement & Custody History (NEW AUDIT TRACKER) */}
+            {/* Tab 2: Court Hearings & Orders History */}
+            <Tab
+              key="hearings"
+              title={`Court Hearings & Orders Timeline (${hearings.length})`}
+            >
+              <div className="mt-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                      Chronological Judicial Hearings &amp; Court Orders Log
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      High Court order record, daily cause list bench updates, and 1-click snapshot rollback.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    radius="sm"
+                    className="bg-[#0f2744] text-xs font-semibold text-white hover:bg-[#163a66]"
+                    startContent={<span className="material-symbols-rounded text-sm">add</span>}
+                    onPress={onHearingOpen}
+                  >
+                    Record New Hearing
+                  </Button>
+                </div>
+
+                {hearings.length > 0 ? (
+                  <div className="relative pl-6 space-y-6 before:absolute before:bottom-0 before:left-2 before:top-2 before:w-0.5 before:bg-slate-200">
+                    {hearings.map((h, idx) => (
+                      <div key={h._id || idx} className="relative text-xs">
+                        <div className="absolute -left-6 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-800 text-[9px] font-bold text-white shadow">
+                          {idx + 1}
+                        </div>
+
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5 shadow-2xs hover:bg-white transition-colors">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/60 pb-2 mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-900">
+                                Hearing: {new Date(h.hearingDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                              </span>
+                              <Chip
+                                size="sm"
+                                variant="flat"
+                                color={
+                                  h.orderType.includes("STAY")
+                                    ? "danger"
+                                    : h.orderType.includes("DIRECTION")
+                                    ? "warning"
+                                    : "primary"
+                                }
+                                className="text-[10px] font-bold"
+                              >
+                                {h.orderType}
+                              </Chip>
+                              <span className="text-slate-400">·</span>
+                              <span className="text-[11px] text-slate-600 font-medium">
+                                Room: <strong>{h.courtRoomNo || "--"}</strong>
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className="rounded bg-amber-50 border border-amber-200 px-2 py-0.5 font-bold text-amber-800 text-[10px]">
+                                NDOH: {h.ndoh ? new Date(h.ndoh).toLocaleDateString("en-GB") : "Adjourned sine die"}
+                              </span>
+
+                              {!h.isOverridden && (
+                                <Button
+                                  size="sm"
+                                  variant="light"
+                                  color="danger"
+                                  className="h-6 text-[10px] font-bold"
+                                  onClick={() => handleRollbackHearing(h._id)}
+                                >
+                                  Rollback
+                                </Button>
+                              )}
+
+                              {h.isOverridden && (
+                                <Chip size="sm" variant="bordered" color="default" className="text-[9px]">
+                                  Rolled Back
+                                </Chip>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="text-slate-700 font-serif leading-relaxed text-[11px] bg-white p-2.5 rounded border border-slate-200/70">
+                            {h.businessRecorded}
+                          </div>
+
+                          <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
+                            <span>
+                              Bench: <strong>{h.judgeCoram || "--"}</strong>
+                            </span>
+                            <span>
+                              Logged By: {h.enteredByOfficerName} ({h.enteredByDesignation})
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400">
+                    No judicial hearings logged for this docket yet. Click &quot;Record New Hearing&quot; to log the first proceeding.
+                  </div>
+                )}
+              </div>
+            </Tab>
+
+            {/* Tab 3: File Movement & Custody History */}
             <Tab
               key="movement"
               title={`File Movement & Custody History (${movementHistory.length})`}
@@ -408,7 +635,6 @@ export default function CaseDossier360Page() {
                   <div className="relative pl-6 space-y-6 before:absolute before:bottom-0 before:left-2 before:top-2 before:w-0.5 before:bg-slate-200">
                     {movementHistory.map((m, idx) => (
                       <div key={m._id || idx} className="relative text-xs">
-                        {/* Timeline Bullet */}
                         <div className="absolute -left-6 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#0f2744] text-[9px] font-bold text-white shadow">
                           {idx + 1}
                         </div>
@@ -480,7 +706,7 @@ export default function CaseDossier360Page() {
               </div>
             </Tab>
 
-            {/* Tab 3: Connected Bunch Writs */}
+            {/* Tab 4: Connected Bunch Writs */}
             <Tab
               key="connected"
               title={`Connected Bunch Writs (${connectedList.length})`}
@@ -538,7 +764,7 @@ export default function CaseDossier360Page() {
               </div>
             </Tab>
 
-            {/* Tab 4: Candidate Roster */}
+            {/* Tab 5: Candidate Roster */}
             <Tab key="roster" title={`Candidate Roster (${petitioners.length})`}>
               <div className="mt-4">
                 <Table removeWrapper aria-label="Petitioners Roster Table" className="min-w-full">
@@ -577,7 +803,102 @@ export default function CaseDossier360Page() {
         </CardBody>
       </Card>
 
-      {/* MODAL 1: CHANGE PROCEDURAL STAGE / JUDICIAL STATUS */}
+      {/* MODAL 1: RECORD NEW JUDICIAL HEARING */}
+      <Modal isOpen={isHearingOpen} onOpenChange={onHearingOpenChange} placement="top" size="lg">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <span className="material-symbols-rounded text-blue-700">gavel</span>
+                Record Judicial Proceeding &amp; Next Date (NDOH)
+              </ModalHeader>
+              <ModalBody className="space-y-3 text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    type="date"
+                    size="sm"
+                    label="Hearing Date *"
+                    labelPlacement="outside"
+                    value={hearingDate}
+                    onChange={(e) => setHearingDate(e.target.value)}
+                  />
+                  <Input
+                    type="date"
+                    size="sm"
+                    label="Next Date of Hearing (NDOH)"
+                    labelPlacement="outside"
+                    value={newNdoh}
+                    onChange={(e) => setNewNdoh(e.target.value)}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    size="sm"
+                    label="Court Room / Hall No."
+                    labelPlacement="outside"
+                    placeholder="e.g. Court No. 12"
+                    value={courtRoomNo}
+                    onValueChange={setCourtRoomNo}
+                  />
+                  <Input
+                    size="sm"
+                    label="Coram / Hon'ble Bench"
+                    labelPlacement="outside"
+                    placeholder="e.g. Hon'ble Justice Vivek Chaudhary"
+                    value={judgeCoram}
+                    onValueChange={setJudgeCoram}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Order Nature / Classification</label>
+                  <Select
+                    size="sm"
+                    selectedKeys={[orderType]}
+                    onChange={(e) => setOrderType(e.target.value || "ADJOURNMENT")}
+                    className="bg-slate-50"
+                  >
+                    <SelectItem key="ADJOURNMENT">ADJOURNMENT (Standard Next Tareekh)</SelectItem>
+                    <SelectItem key="COUNTER_AFFIDAVIT_CALLED">COUNTER_AFFIDAVIT_CALLED (Time Granted to State)</SelectItem>
+                    <SelectItem key="STAY_GRANTED">STAY_GRANTED (Interim Injunction Issued)</SelectItem>
+                    <SelectItem key="STAY_EXTENDED">STAY_EXTENDED (Interim Relief Continued)</SelectItem>
+                    <SelectItem key="STAY_VACATED">STAY_VACATED (Vacation Motion Allowed)</SelectItem>
+                    <SelectItem key="DIRECTION_ISSUED">DIRECTION_ISSUED (Speaking Order Compliance)</SelectItem>
+                    <SelectItem key="FINAL_JUDGMENT">FINAL_JUDGMENT (Case Disposed on Merit)</SelectItem>
+                  </Select>
+                </div>
+
+                <Textarea
+                  size="sm"
+                  label="Business Recorded / High Court Directions *"
+                  labelPlacement="outside"
+                  placeholder="Record summary of what happened before the bench today..."
+                  value={businessRecorded}
+                  onValueChange={setBusinessRecorded}
+                  minRows={3}
+                />
+              </ModalBody>
+              <ModalFooter>
+                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isRecordingHearing}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  radius="sm"
+                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                  isLoading={isRecordingHearing}
+                  onClick={handleRecordHearing}
+                >
+                  Commit Hearing Proceeding
+                </Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      {/* MODAL 2: CHANGE PROCEDURAL STAGE / JUDICIAL STATUS */}
       <Modal isOpen={isStatusOpen} onOpenChange={onStatusOpenChange} placement="top" size="md">
         <ModalContent>
           {(onClose) => (
@@ -656,7 +977,7 @@ export default function CaseDossier360Page() {
         </ModalContent>
       </Modal>
 
-      {/* MODAL 2: TAG CONNECTED WRIT */}
+      {/* MODAL 3: TAG CONNECTED WRIT */}
       <Modal isOpen={isAttachOpen} onOpenChange={onAttachOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
