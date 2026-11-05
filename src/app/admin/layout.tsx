@@ -17,7 +17,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAppSelector, useAppDispatch } from "@/store/hooks";
-import { logoutAction } from "@/store/slices/authSlice";
+import { logoutAction, logoutThunk } from "@/store/slices/authSlice";
 import {
   fetchUnreadCount,
   fetchNotificationsList,
@@ -116,7 +116,7 @@ export default function WritAppLayout({ children }: { children: React.ReactNode 
   }, [user?.allowedMenus, pathname]);
 
   const handleLogout = () => {
-    dispatch(logoutAction());
+    dispatch(logoutThunk());
     toast.success("Signed out successfully.");
     router.replace("/");
   };

@@ -1,26 +1,57 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
-import Cookies from "js-cookie";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001/api/v1";
+import axios, {
+  AxiosError,
+  InternalAxiosRequestConfig,
+} from "axios";
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:5001/api/v1";
 
 const axiosClient = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true, // Cookies automatically send/receive karne ke liye
+  withCredentials: true,
   timeout: 30000,
 });
 
-// Request Interceptor: Attach JWT Bearer Token dynamically
+interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean;
+}
+
+let refreshPromise: Promise<string> | null = null;
+
+const clearAuthData = () => {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("access_token");
+  }
+};
+
+const redirectToLogin = () => {
+  if (typeof window !== "undefined") {
+    const currentPath = window.location.pathname;
+
+    if (currentPath !== "/" && !currentPath.includes("/login")) {
+      window.location.href = "/";
+    }
+  }
+};
+
 axiosClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = Cookies.get("access_token") || (typeof window !== "undefined" ? localStorage.getItem("access_token") : null);
-    
-    if (token && config.headers) {
+    const token =
+      typeof window !== "undefined"
+        ? localStorage.getItem("access_token")
+        : null;
+
+    if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // Agar FormData bhej rahe hain (DMS file uploads), toh browser ko khud boundary set karne do
-    if (config.data instanceof FormData) {
-      delete config.headers["Content-Type"];
+    if (
+      typeof FormData !== "undefined" &&
+      config.data instanceof FormData
+    ) {
+      config.headers.delete("Content-Type");
     } else if (!config.headers["Content-Type"]) {
       config.headers["Content-Type"] = "application/json";
     }
@@ -30,20 +61,86 @@ axiosClient.interceptors.request.use(
   (error: AxiosError) => Promise.reject(error)
 );
 
-// Response Interceptor: Global 401 handling
 axiosClient.interceptors.response.use(
   (response) => response,
-  (error: AxiosError<any>) => {
-    if (error.response?.status === 401) {
-      Cookies.remove("access_token");
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("access_token");
-        if (window.location.pathname !== "/" && !window.location.pathname.includes("/login")) {
-          window.location.href = "/";
-        }
-      }
+
+  async (error: AxiosError<any>) => {
+    const originalRequest = error.config as
+      | CustomAxiosRequestConfig
+      | undefined;
+
+    if (!error.response || !originalRequest) {
+      return Promise.reject(error);
     }
-    return Promise.reject(error);
+
+    if (error.response.status !== 401) {
+      return Promise.reject(error);
+    }
+
+    const requestUrl = originalRequest.url || "";
+
+    const excludedUrls = [
+      "/auth/login",
+      "/auth/refresh-token",
+      "/auth/logout",
+      "/auth/forgot-password",
+      "/auth/reset-password",
+    ];
+
+    if (excludedUrls.some((url) => requestUrl.includes(url))) {
+      return Promise.reject(error);
+    }
+
+    if (originalRequest._retry) {
+      clearAuthData();
+      redirectToLogin();
+      return Promise.reject(error);
+    }
+
+    originalRequest._retry = true;
+
+    try {
+      if (!refreshPromise) {
+        refreshPromise = axios
+          .post(
+            `${API_BASE_URL}/auth/refresh-token`,
+            {},
+            {
+              withCredentials: true,
+              timeout: 30000,
+            }
+          )
+          .then((response) => {
+            const newAccessToken = response.data?.token;
+
+            if (!newAccessToken) {
+              throw new Error("New access token was not received.");
+            }
+
+            if (typeof window !== "undefined") {
+              localStorage.setItem("access_token", newAccessToken);
+            }
+
+            return newAccessToken;
+          })
+          .finally(() => {
+            refreshPromise = null;
+          });
+      }
+      const newAccessToken = await refreshPromise;
+      originalRequest.headers.Authorization =
+        `Bearer ${newAccessToken}`;
+      return axiosClient(originalRequest);
+    } catch (refreshError) {
+      const refreshStatus = (
+        refreshError as AxiosError
+      ).response?.status;
+      if (refreshStatus === 401 || refreshStatus === 403) {
+        clearAuthData();
+        redirectToLogin();
+      }
+      return Promise.reject(refreshError);
+    }
   }
 );
 

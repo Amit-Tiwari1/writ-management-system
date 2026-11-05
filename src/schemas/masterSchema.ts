@@ -1,131 +1,211 @@
+
 import { z } from "zod";
 
+const requiredId = (message: string) =>
+  z.string().trim().min(1, message);
+
+const requiredText = (
+  message: string,
+  minLength = 2,
+  maxLength?: number,
+) => {
+  let schema = z.string().trim().min(minLength, message);
+
+  if (maxLength !== undefined) {
+    schema = schema.max(
+      maxLength,
+      `Maximum ${maxLength} characters allowed`,
+    );
+  }
+
+  return schema;
+};
+
+const optionalText = (defaultValue = "") =>
+  z.string().trim().default(defaultValue);
+
+const requiredUppercaseText = (
+  message: string,
+  minLength = 2,
+  maxLength?: number,
+) => {
+  let schema = z.string().trim().toUpperCase().min(minLength, message);
+
+  if (maxLength !== undefined) {
+    schema = schema.max(
+      maxLength,
+      `Maximum ${maxLength} characters allowed`,
+    );
+  }
+
+  return schema;
+};
+
 export const stateSchema = z.object({
-  stateName: z.string().min(2, "State name is required").trim(),
-  stateCode: z.string().min(2, "State code is required").max(10).toUpperCase().trim(),
-  country: z.string().default("India"),
+  stateName: requiredText("State name is required"),
+  stateCode: requiredUppercaseText("State code is required", 2, 10),
+  country: z.string().trim().default("India"),
 });
 
+
 export const zoneSchema = z.object({
-  zoneName: z.string().min(2, "Zone name is required").trim(),
-  stateId: z.string().min(1, "State selection is required"),
-  headquarters: z.string().optional().default(""),
+  zoneName: requiredText("Zone name is required"),
+  stateId: requiredId("Please select a state"),
+  headquarters: optionalText(""),
 });
 
 export const rangeSchema = z.object({
-  rangeName: z.string().min(2, "Range name is required").trim(),
-  zoneId: z.string().min(1, "Zone selection is required"),
-  stateId: z.string().min(1, "State selection is required"),
+  rangeName: requiredText("Range name is required"),
+  zoneId: requiredId("Please select a zone"),
+  stateId: requiredId("Please select a state"),
 });
 
 export const districtSchema = z.object({
-  districtName: z.string().min(2, "District name is required").trim(),
-  stateId: z.string().min(1, "State selection is required"),
-  zoneId: z.string().min(1, "Zone selection is required"),
-  rangeId: z.string().min(1, "Range selection is required"),
+  districtName: requiredText("District name is required"),
+  stateId: requiredId("Please select a state"),
+  zoneId: requiredId("Please select a zone"),
+  rangeId: requiredId("Please select a range"),
 });
 
 export const courtSchema = z.object({
-  courtName: z.string().min(3, "Court name is required").trim(),
-  shortCode: z.string().min(2, "Short code is required").toUpperCase().trim(),
-  courtType: z.string().default("HIGH_COURT"),
-  location: z.string().min(2, "Location is required").trim(),
+  courtName: requiredText("Court name is required", 3),
+  shortCode: requiredUppercaseText("Court short code is required", 2),
+  courtType: z.string().trim().default("HIGH_COURT"),
+  location: requiredText("Court location is required"),
 });
 
 export const caseTypeSchema = z.object({
-  courtId: z.string().min(1, "Court selection is required"),
-  caseTypeName: z.string().min(2, "Case type name is required").trim(),
-  shortName: z.string().default("").transform((v) => v.trim()),
+  courtId: requiredId("Please select a court"),
+  caseTypeName: requiredText("Case type name is required"),
+  shortName: optionalText(""),
 });
 
 export const categorySchema = z.object({
-  categoryName: z.string().min(2, "Category name is required").trim(),
-  description: z.string().optional().default(""),
-  order: z.number().int().min(1).default(1),
+  categoryName: requiredText("Category name is required"),
+  description: optionalText(""),
+  order: z
+    .number({
+      invalid_type_error: "Order must be a number",
+    })
+    .int("Order must be a whole number")
+    .min(1, "Order must be at least 1")
+    .default(1),
 });
 
 export const subCategorySchema = z.object({
-  categoryId: z.string().min(1, "Category is required"),
-  subCategoryName: z.string().min(2, "Subcategory name is required").trim(),
-  defaultOfficerName: z.string().optional().default("--"),
+  categoryId: requiredId("Please select a category"),
+  subCategoryName: requiredText("Subcategory name is required"),
+  defaultOfficerId: z
+    .string()
+    .trim()
+    .default("")
+    .transform((value) => value || null),
 });
 
 export const subjectSchema = z.object({
-  categoryId: z.string().min(1, "Category is required"),
-  subCategoryId: z.string().min(1, "Subcategory is required"),
-  subjectTitle: z.string().min(2, "Subject title is required").trim(),
+  categoryId: requiredId("Please select a category"),
+  subCategoryId: requiredId("Please select a subcategory"),
+  subjectTitle: requiredText("Subject title is required"),
 });
 
 export const custodianMappingSchema = z.object({
-  categoryId: z.string().min(1, "Case Category selection is required"),
-  subjectId: z.string().min(1, "Litigation Subject selection is required"),
-  roleOrDesignation: z.string().min(1, "Designation / Role selection is required"),
-  officerName: z.string().min(2, "Assigned Officer selection is required").trim(),
-  officerUserId: z.string().optional().default(""),
+  categoryId: requiredId("Please select a case category"),
+  subjectId: requiredId("Please select a litigation subject"),
+  userId: requiredId("Please select an assigned officer"),
+  designationId: requiredId("Please select a designation"),
 });
 
 export const rankSchema = z.object({
-  rankName: z.string().min(2, "Rank name is required").trim(),
-  shortCode: z.string().min(2, "Short code is required").toUpperCase().trim(),
-  cadreType: z.string().min(2, "Cadre type is required").trim(),
-  payLevelGrade: z.string().min(1, "Pay level grade is required").trim(),
+  rankName: requiredText("Rank name is required"),
+  shortCode: requiredUppercaseText("Rank short code is required", 2),
+  cadreType: requiredText("Cadre type is required"),
+  payLevelGrade: requiredText("Pay level grade is required", 1),
 });
 
 export const designationSchema = z.object({
-  title: z.string().min(2, "Designation title is required").trim(),
-  authorityLevel: z.string().min(1, "Authority level is required").trim(),
+  title: requiredText("Designation title is required"),
+  authorityLevel: requiredText("Authority level is required", 1),
   canSignPWC: z.boolean().default(false),
   canForwardFiles: z.boolean().default(true),
-  defaultRole: z.string().default("Officer-in-Charge (OIC)"),
+  defaultRole: z.string().trim().default("Officer-in-Charge (OIC)"),
 });
 
 export const departmentSchema = z.object({
-  unitCode: z.string().min(2, "Unit code is required").toUpperCase().trim(),
-  unitName: z.string().min(2, "Unit name is required").trim(),
-  parentFormation: z.string().min(2, "Parent formation is required").trim(),
-  headquarters: z.string().default("Lucknow"),
+  unitCode: requiredUppercaseText("Unit code is required", 2),
+  unitName: requiredText("Unit name is required"),
+  parentFormation: requiredText("Parent formation is required"),
+  headquarters: z.string().trim().default("Lucknow"),
 });
 
 export const respondentGroupSchema = z.object({
   groupName: z
     .string()
+    .trim()
+    .toUpperCase()
     .min(2, "Respondent group code must be at least 2 characters")
-    .max(100, "Group code is too long")
-    .transform((val) => val.trim().toUpperCase()),
-  defaultRankTitle: z
+    .max(100, "Group code cannot exceed 100 characters"),
+
+  defaultRankId: z
     .string()
-    .min(2, "Official title must be at least 2 characters")
-    .max(150, "Title is too long")
-    .transform((val) => val.trim()),
+    .trim()
+    .min(1, "Please select a default rank")
+    .max(150, "Default rank cannot exceed 150 characters"),
+
   defaultAddress: z
     .string()
-    .min(5, "Official service address must be at least 5 characters")
-    .transform((val) => val.trim()),
+    .trim()
+    .min(5, "Official service address must be at least 5 characters"),
+
   isOurOffice: z.boolean().default(false),
 });
 
 export const standingCounselSchema = z.object({
-  name: z.string().min(2, "Counsel name is required").trim(),
-  monitoredBenches: z.string().min(2, "Monitored bench selection is required").trim(),
+  name: requiredText("Counsel name is required"),
+  monitoredBenches: requiredText("Monitored bench selection is required"),
   autoFlag: z.boolean().default(true),
 });
 
 export const actionMappingSchema = z.object({
-  courtDecision: z.string().min(2, "Court decision is required").trim(),
-  actionStatus: z.string().min(2, "Action status is required").trim(),
-  actionNotTaken: z.string().min(2, "Action not taken text is required").trim(),
+  courtDecision: requiredText("Court decision is required"),
+  actionStatus: requiredText("Action status is required"),
+  actionNotTaken: requiredText("Action not taken text is required"),
+
   requiresComplianceDeadline: z.boolean().default(false),
-  defaultDeadlineDays: z.number().int().min(0).default(0),
-  impactScope: z.string().default("Standard Workflow"),
+
+  defaultDeadlineDays: z
+    .number({
+      invalid_type_error: "Deadline days must be a number",
+    })
+    .int("Deadline days must be a whole number")
+    .min(0, "Deadline days cannot be negative")
+    .default(0),
+
+  impactScope: z.string().trim().default("Standard Workflow"),
 });
 
 export const aliasSchema = z.object({
-  keyword: z.string().min(2, "Keyword is required").trim(),
-  language: z.string().default("HINDI"),
-  category: z.string().default("BOARD_ALIAS"),
-  matchWeight: z.string().default("1.0"),
+  keyword: requiredText("Keyword is required"),
+  language: z.string().trim().default("HINDI"),
+  category: z.string().trim().default("BOARD_ALIAS"),
+  matchWeight: z.string().trim().default("1.0"),
 });
-
+export type StateFormInput = z.input<typeof stateSchema>;
+export type ZoneFormInput = z.input<typeof zoneSchema>;
+export type RangeFormInput = z.input<typeof rangeSchema>;
+export type DistrictFormInput = z.input<typeof districtSchema>;
+export type CourtFormInput = z.input<typeof courtSchema>;
+export type CaseTypeFormInput = z.input<typeof caseTypeSchema>;
+export type CategoryFormInput = z.input<typeof categorySchema>;
+export type SubCategoryFormInput = z.input<typeof subCategorySchema>;
+export type SubjectFormInput = z.input<typeof subjectSchema>;
+export type CustodianMappingFormInput = z.input<typeof custodianMappingSchema>;
+export type RankFormInput = z.input<typeof rankSchema>;
+export type DesignationFormInput = z.input<typeof designationSchema>;
+export type DepartmentFormInput = z.input<typeof departmentSchema>;
+export type RespondentGroupFormInput = z.input<typeof respondentGroupSchema>;
+export type StandingCounselFormInput = z.input<typeof standingCounselSchema>;
+export type ActionMappingFormInput = z.input<typeof actionMappingSchema>;
+export type AliasFormInput = z.input<typeof aliasSchema>;
 export type StateFormValues = z.infer<typeof stateSchema>;
 export type ZoneFormValues = z.infer<typeof zoneSchema>;
 export type RangeFormValues = z.infer<typeof rangeSchema>;

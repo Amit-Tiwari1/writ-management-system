@@ -1,3 +1,4 @@
+
 export interface DashboardKpis {
   activeWrits: {
     total: number;
@@ -27,26 +28,31 @@ export interface DashboardKpisResponse {
 export interface MatrixRowItem {
   caseType: string;
   label: string;
+
   atAGlance: {
     previous: number;
     inCurrentMonth: number;
     total: number;
   };
+
   closed: {
     closed: number;
     toBeClosed: number;
   };
+
   pending: {
     inBoard: number;
     inUnits: number;
     inCourt: number;
   };
+
   dismissedWithdrawn: {
     dismissed: number;
     withdrawn: number;
   };
+
   representationPending: {
-    instructionsPwc: number;
+    pwcInstructions: number;
     allowedOff: number;
     disposedOff: number;
     otherPending: number;
@@ -133,7 +139,7 @@ export interface HearingDateCaseItem {
   fileNo: string;
   writNumber?: string;
   cnrNumber?: string;
-  court: string;
+  courtCode: string;
   benchLocation?: string;
   courtRoomNo?: string;
   leadPetitioner: string;

@@ -1,5 +1,7 @@
+
 import axiosClient from "./axiosClient";
-import {
+
+import type {
   DashboardKpisResponse,
   ClassificationMatrixResponse,
   CourtDistributionResponse,
@@ -14,6 +16,7 @@ import {
   HearingDateCaseItem,
 } from "../types/dashboard.types";
 
+// Re-export dashboard types for convenient imports elsewhere.
 export type {
   DashboardKpisResponse,
   ClassificationMatrixResponse,
@@ -30,6 +33,8 @@ export type {
 };
 
 export const DashboardAPI = {
+ 
+
   getKpis: async (): Promise<DashboardKpisResponse> => {
     const res = await axiosClient.get("/dashboard/kpis");
     return res.data;
@@ -40,7 +45,10 @@ export const DashboardAPI = {
     courtCode?: string;
     year?: string | number;
   }): Promise<ClassificationMatrixResponse> => {
-    const res = await axiosClient.get("/dashboard/matrix", { params });
+    const res = await axiosClient.get("/dashboard/matrix", {
+      params,
+    });
+
     return res.data;
   },
 
@@ -49,26 +57,35 @@ export const DashboardAPI = {
     return res.data;
   },
 
+
   getOicWorkload: async (): Promise<OicWorkloadResponse> => {
     const res = await axiosClient.get("/dashboard/oic-workload");
     return res.data;
   },
 
+
   getCalendarHeatmap: async (params?: {
     month?: number;
     year?: number;
   }): Promise<CalendarHeatmapResponse> => {
-    const res = await axiosClient.get("/dashboard/calendar-heatmap", { params });
-    return res.data;
-  },
-
-  getCasesForHearingDate: async (dateString: string): Promise<HearingDateCasesResponse> => {
-    const res = await axiosClient.get("/dashboard/calendar-cases", {
-      params: { date: dateString },
+    const res = await axiosClient.get("/dashboard/calendar-heatmap", {
+      params,
     });
+
     return res.data;
   },
 
+  getCasesForHearingDate: async (
+    dateString: string
+  ): Promise<HearingDateCasesResponse> => {
+    const res = await axiosClient.get("/dashboard/calendar-cases", {
+      params: {
+        date: dateString,
+      },
+    });
+
+    return res.data;
+  },
   downloadMatrixPdf: async (params?: {
     wing?: string;
     courtCode?: string;
@@ -78,6 +95,7 @@ export const DashboardAPI = {
       params,
       responseType: "text",
     });
+
     return res.data;
   },
 };

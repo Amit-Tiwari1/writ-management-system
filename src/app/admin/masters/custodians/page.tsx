@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
@@ -24,349 +25,795 @@ import {
   Pagination,
   Spinner,
 } from "@nextui-org/react";
+
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useDispatch, useSelector } from "react-redux";
 
-import { MastersAPI } from "@/api/mastersApi";
-import { AdminAPI } from "@/api/userApi";
-import { fetchStaffUsers } from "@/store/slices/usersSlice";
-import { RootState, AppDispatch } from "@/store";
+import type { RootState, AppDispatch } from "@/store";
+
+import {
+  fetchSubjectCustodians,
+  createCustodian,
+  updateCustodian,
+  deleteCustodian,
+} from "@/store/thunks/masterThunks/custodiansThunks";
+
+import {
+  fetchCategories,
+  fetchSubjects,
+} from "@/store/thunks/masterThunks/taxonomyThunks";
+
+import {
+  fetchDesignations,
+} from "@/store/thunks/masterThunks/designationThunk";
+
 import {
   ICategoryItem,
   ISubjectItem,
   IDesignationItem,
   ICustodianRecord,
 } from "@/types/master.types";
+
 import { StaffUserItem } from "@/types/user.types";
-import { custodianMappingSchema, CustodianMappingFormValues } from "@/schemas/masterSchema";
+
+import {
+  custodianMappingSchema,
+  CustodianMappingFormValues,
+} from "@/schemas/masterSchema";
 
 interface SelectOption {
   key: string;
   label: string;
 }
 
+const ROWS_PER_PAGE = 5;
+
+// =========================================================
+// RELATION HELPERS
+// =========================================================
+
+const getRelationId = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value && typeof value === "object" && "_id" in value) {
+    const id = (value as { _id?: unknown })._id;
+    return typeof id === "string" ? id : "";
+  }
+
+  return "";
+};
+
+const getRelationLabel = (
+  value: unknown,
+  fields: string[],
+): string => {
+  if (!value || typeof value !== "object") {
+    return "--";
+  }
+
+  const record = value as Record<string, unknown>;
+
+  for (const field of fields) {
+    const fieldValue = record[field];
+
+    if (
+      typeof fieldValue === "string" &&
+      fieldValue.trim()
+    ) {
+      return fieldValue;
+    }
+  }
+
+  return "--";
+};
+
+// =========================================================
+// COMPONENT
+// =========================================================
+
 export default function CustodianMappingPage() {
   const dispatch = useDispatch<AppDispatch>();
 
-  // Redux state
+  // =======================================================
+  // REDUX SELECTORS
+  // =======================================================
+
+  const custodiansState = useSelector(
+    (state: RootState) => state.custodians,
+  );
+
+  const taxonomyState = useSelector(
+    (state: RootState) => state.taxonomy,
+  );
+
+  const designationsState = useSelector(
+    (state: RootState) => state.designations,
+  );
+
   const reduxUsers = useSelector((state: RootState) => {
-    const userSlice = (state as any).users;
-    return (userSlice?.users as StaffUserItem[]) || [];
+    return (state.users as any)?.users as StaffUserItem[] || [];
   });
 
-  // Local state to guarantee instant availability
-  const [directUsers, setDirectUsers] = useState<StaffUserItem[]>([]);
-  const [usersLoading, setUsersLoading] = useState<boolean>(false);
+  // Custodians
+  const custodianList: ICustodianRecord[] =
+    custodiansState.list.data || [];
 
-  const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
-  const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
+  const totalCount =
+    custodiansState.list.totalCount || 0;
 
-  const [custodians, setCustodians] = useState<ICustodianRecord[]>([]);
-  const [categories, setCategories] = useState<ICategoryItem[]>([]);
-  const [subjects, setSubjects] = useState<ISubjectItem[]>([]);
-  const [designations, setDesignations] = useState<IDesignationItem[]>([]);
+  const loading =
+    custodiansState.list.loading || false;
 
-  const [loading, setLoading] = useState<boolean>(true);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  // Categories
+  const categories: ICategoryItem[] =
+    taxonomyState.categories.options.data || [];
 
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState("ALL");
+  const categoriesLoading =
+    taxonomyState.categories.options.loading;
+
+  // Subjects
+  const subjects: ISubjectItem[] =
+    taxonomyState.subjects.options.data || [];
+
+  const subjectsLoading =
+    taxonomyState.subjects.options.loading;
+
+  // Designations
+  const designations: IDesignationItem[] =
+    designationsState.options.data || [];
+
+  const designationsLoading =
+    designationsState.options.loading;
+
+  // =======================================================
+  // LOCAL STATE
+  // =======================================================
+
+  const [selectedCategoryFilter, setSelectedCategoryFilter] =
+    useState("ALL");
+
   const [searchQuery, setSearchQuery] = useState("");
 
   const [page, setPage] = useState(1);
-  const rowsPerPage = 8;
 
-  const [itemToDelete, setItemToDelete] = useState<ICustodianRecord | null>(null);
+  const [editingItem, setEditingItem] =
+    useState<ICustodianRecord | null>(null);
 
-  // React Hook Form Integration
+  const [itemToDelete, setItemToDelete] =
+    useState<ICustodianRecord | null>(null);
+
+  const [isSubmitting, setIsSubmitting] =
+    useState(false);
+
+  // =======================================================
+  // MODALS
+  // =======================================================
+
+  const {
+    isOpen: isAddOpen,
+    onOpen: onAddOpen,
+    onClose: onAddClose,
+  } = useDisclosure();
+
+  const {
+    isOpen: isDeleteOpen,
+    onOpen: onDeleteOpen,
+    onClose: onDeleteClose,
+  } = useDisclosure();
+
+  // =======================================================
+  // FORM
+  // =======================================================
+
   const {
     control,
     handleSubmit,
     watch,
     setValue,
     reset,
+    trigger,
     formState: { errors },
   } = useForm<CustodianMappingFormValues>({
     resolver: zodResolver(custodianMappingSchema) as any,
+    mode: "onChange",
+    reValidateMode: "onChange",
     defaultValues: {
       categoryId: "",
       subjectId: "",
-      roleOrDesignation: "",
-      officerName: "",
-      officerUserId: "",
+      userId: "",
+      designationId: "",
     },
   });
 
   const selectedCategoryId = watch("categoryId");
-  const selectedDesignation = watch("roleOrDesignation");
 
-  // Load Users directly + Redux
-  const loadStaffUsers = useCallback(async () => {
-    setUsersLoading(true);
-    try {
-      dispatch(fetchStaffUsers());
-      const res = await AdminAPI.getUsersList({ limit: 100, status: "ACTIVE" });
-      if (res?.success && Array.isArray(res.data)) {
-        setDirectUsers(res.data);
-      }
-    } catch (err) {
-      console.error("Failed to load staff users:", err);
-    } finally {
-      setUsersLoading(false);
-    }
-  }, [dispatch]);
+  const selectedDesignationId = watch("designationId");
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [resCustodians, resCategories, resDesignations] = await Promise.all([
-        MastersAPI.getCustodians({
-          limit: 100,
-          categoryId: selectedCategoryFilter !== "ALL" ? selectedCategoryFilter : undefined,
-        }),
-        MastersAPI.getCategories({ limit: 100 }),
-        MastersAPI.getDesignations({ limit: 100 }),
-      ]);
+  // =======================================================
+  // FETCH CUSTODIANS
+  // =======================================================
 
-      if (resCustodians?.success) setCustodians(resCustodians.data || []);
-      if (resCategories?.success) setCategories(resCategories.data || []);
-      if (resDesignations?.success) setDesignations(resDesignations.data || []);
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to load custodian mappings");
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedCategoryFilter]);
+  const loadCustodians = useCallback(() => {
+    dispatch(
+      fetchSubjectCustodians({
+        page,
+        limit: ROWS_PER_PAGE,
+        search: searchQuery.trim() || undefined,
+        categoryId:
+          selectedCategoryFilter !== "ALL"
+            ? selectedCategoryFilter
+            : undefined,
+        view: "list",
+      } as any),
+    );
+  }, [
+    dispatch,
+    page,
+    searchQuery,
+    selectedCategoryFilter,
+  ]);
 
   useEffect(() => {
-    loadData();
-    loadStaffUsers();
-  }, [loadData, loadStaffUsers]);
+    loadCustodians();
+  }, [loadCustodians]);
 
-  // Combined staff users safely
-  const staffUsers: StaffUserItem[] = useMemo(() => {
-    if (directUsers.length > 0) return directUsers;
-    if (Array.isArray(reduxUsers) && reduxUsers.length > 0) return reduxUsers;
-    return [];
-  }, [directUsers, reduxUsers]);
+  // =======================================================
+  // FETCH CATEGORY AND DESIGNATION OPTIONS
+  // =======================================================
 
-  // Dynamic Subject Loading when Category changes
-  const handleCategorySelection = async (catId: string) => {
-    setValue("categoryId", catId);
-    setValue("subjectId", "");
-    if (!catId) {
-      setSubjects([]);
-      return;
-    }
-    try {
-      const res = await MastersAPI.getSubjects({ categoryId: catId, limit: 200 });
-      if (res?.success) {
-        setSubjects(res.data || []);
+  useEffect(() => {
+    dispatch(
+      fetchCategories({
+        limit: 100,
+        view: "options",
+      } as any),
+    );
+
+    dispatch(
+      fetchDesignations({
+        limit: 100,
+        view: "options",
+      } as any),
+    );
+  }, [dispatch]);
+
+  // =======================================================
+  // FETCH STAFF USERS
+  // =======================================================
+
+  useEffect(() => {
+    // Users are read from the existing Redux users slice.
+    // No direct AdminAPI call is made here.
+  }, []);
+
+  // =======================================================
+  // FETCH SUBJECTS BY CATEGORY
+  // =======================================================
+
+  const loadSubjectsByCategory = useCallback(
+    (categoryId: string) => {
+      if (!categoryId) {
+        return;
       }
-    } catch (err) {
-      console.error("Failed to fetch subjects:", err);
+
+      dispatch(
+        fetchSubjects({
+          categoryId,
+          limit: 200,
+          view: "options",
+        } as any),
+      );
+    },
+    [dispatch],
+  );
+
+  // =======================================================
+  // STAFF USERS
+  // =======================================================
+
+  const staffUsers: StaffUserItem[] = useMemo(() => {
+    if (Array.isArray(reduxUsers)) {
+      return reduxUsers;
+    }
+
+    return [];
+  }, [reduxUsers]);
+
+  // =======================================================
+  // DESIGNATION-WISE STAFF FILTER
+  // =======================================================
+
+  const filteredOfficers = useMemo(() => {
+    if (!staffUsers.length) {
+      return [];
+    }
+
+    if (!selectedDesignationId) {
+      return staffUsers;
+    }
+
+    const selectedDesignation = designations.find(
+      (designation) =>
+        designation._id === selectedDesignationId,
+    );
+
+    const target =
+      selectedDesignation?.title?.toLowerCase().trim() || "";
+
+    if (!target) {
+      return staffUsers;
+    }
+
+    const matched = staffUsers.filter((user) => {
+      const userDesignation =
+        user.designationAndWing?.designation
+          ?.toLowerCase()
+          .trim() || "";
+
+      const userRole =
+        user.assignedRole?.toLowerCase().trim() || "";
+
+      return (
+        userDesignation.includes(target) ||
+        target.includes(userDesignation) ||
+        userRole.includes(target)
+      );
+    });
+
+    return matched.length > 0 ? matched : staffUsers;
+  }, [
+    staffUsers,
+    selectedDesignationId,
+    designations,
+  ]);
+
+  // =======================================================
+  // DROPDOWN OPTIONS
+  // =======================================================
+
+  const categoryFilterItems: SelectOption[] = useMemo(
+    () => [
+      {
+        key: "ALL",
+        label: "All Master Categories",
+      },
+      ...categories.map((category) => ({
+        key: category._id,
+        label: category.categoryName,
+      })),
+    ],
+    [categories],
+  );
+
+  const categorySelectItems: SelectOption[] = useMemo(
+    () =>
+      categories.map((category) => ({
+        key: category._id,
+        label: category.categoryName,
+      })),
+    [categories],
+  );
+
+  const subjectSelectItems: SelectOption[] = useMemo(
+    () =>
+      subjects.map((subject) => ({
+        key: subject._id,
+        label: subject.subjectTitle,
+      })),
+    [subjects],
+  );
+
+  const designationSelectItems: SelectOption[] = useMemo(
+    () =>
+      designations.map((designation) => ({
+        key: designation._id,
+        label: designation.title,
+      })),
+    [designations],
+  );
+
+  const officerSelectItems: SelectOption[] = useMemo(
+    () =>
+      filteredOfficers.map((user) => ({
+        key: user._id,
+        label: `${user.officerName || user.officerName} (${
+          user.designationAndWing?.designation ||
+          user.assignedRole ||
+          "Staff"
+        })`,
+      })),
+    [filteredOfficers],
+  );
+
+  // =======================================================
+  // CATEGORY SELECTION
+  // =======================================================
+
+  const handleCategorySelection = (
+    categoryId: string,
+    onCategoryChange: (value: string) => void,
+  ) => {
+    onCategoryChange(categoryId);
+
+    setValue("subjectId", "", {
+      shouldValidate: true,
+      shouldDirty: true,
+    });
+
+    if (categoryId) {
+      loadSubjectsByCategory(categoryId);
     }
   };
 
+  // =======================================================
+  // ADD MODAL
+  // =======================================================
+
   const handleOpenAdd = () => {
-    const initialCatId = categories[0]?._id || "";
-    const initialDesignation = designations[0]?.title || "";
+    setEditingItem(null);
+
+    const initialCategoryId =
+      categories[0]?._id || "";
+
+    const initialDesignationId =
+      designations[0]?._id || "";
 
     reset({
-      categoryId: initialCatId,
+      categoryId: initialCategoryId,
       subjectId: "",
-      roleOrDesignation: initialDesignation,
-      officerName: "",
-      officerUserId: "",
+      designationId: initialDesignationId,
+      userId: "",
     });
 
-    if (initialCatId) {
-      handleCategorySelection(initialCatId);
+    if (initialCategoryId) {
+      loadSubjectsByCategory(initialCategoryId);
     }
+
     onAddOpen();
   };
 
-  // Submit Handler
-  const onSaveCustodianMapping = async (values: CustodianMappingFormValues) => {
-    setIsSubmitting(true);
-    try {
-      const matchedUser = staffUsers.find((u) => u.officerName === values.officerName);
+  // =======================================================
+  // EDIT MODAL
+  // =======================================================
 
+  const handleOpenEdit = (item: ICustodianRecord) => {
+    setEditingItem(item);
+
+    const record =
+      item as unknown as Record<string, unknown>;
+
+    const categoryId = getRelationId(record.categoryId);
+    const subjectId = getRelationId(record.subjectId);
+    const designationId = getRelationId(record.designationId);
+    const userId = getRelationId(record.userId);
+
+    reset({
+      categoryId,
+      subjectId,
+      designationId,
+      userId,
+    });
+
+    if (categoryId) {
+      loadSubjectsByCategory(categoryId);
+    }
+
+    onAddOpen();
+  };
+
+  // =======================================================
+  // CLOSE FORM
+  // =======================================================
+
+  const handleCloseForm = () => {
+    if (isSubmitting) return;
+
+    onAddClose();
+
+    setEditingItem(null);
+
+    reset({
+      categoryId: "",
+      subjectId: "",
+      designationId: "",
+      userId: "",
+    });
+  };
+
+  // =======================================================
+  // CREATE / UPDATE CUSTODIAN
+  // =======================================================
+
+  const onSaveCustodianMapping: SubmitHandler<
+    CustodianMappingFormValues
+  > = async (values) => {
+    setIsSubmitting(true);
+
+    try {
       const payload = {
         categoryId: values.categoryId,
         subjectId: values.subjectId,
-        officerName: values.officerName.trim(),
-        designation: values.roleOrDesignation.trim(),
-        userId: matchedUser?._id,
+        designationId: values.designationId,
+        userId: values.userId,
       };
 
-      const res = await MastersAPI.createCustodian(payload);
-      if (res?.success) {
-        toast.success("Subject-Custodian rule mapped successfully!");
-        onAddOpenChange();
-        loadData();
+      if (editingItem) {
+        await dispatch(
+          updateCustodian({
+            id: editingItem._id,
+            payload,
+          }),
+        ).unwrap();
+
+        toast.success(
+          "Custodian mapping updated successfully!",
+        );
+      } else {
+        await dispatch(
+          createCustodian(payload),
+        ).unwrap();
+
+        toast.success(
+          "Custodian mapping created successfully!",
+        );
       }
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to save custodian rule");
+
+      onAddClose();
+
+      setEditingItem(null);
+
+      loadCustodians();
+    } catch (error: any) {
+      toast.error(
+        typeof error === "string"
+          ? error
+          : error?.message ||
+            "Failed to save custodian mapping",
+      );
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleOpenDelete = (item: ICustodianRecord) => {
+  // =======================================================
+  // DELETE CUSTODIAN
+  // =======================================================
+
+  const handleOpenDelete = (
+    item: ICustodianRecord,
+  ) => {
     setItemToDelete(item);
     onDeleteOpen();
   };
 
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
+
     setIsSubmitting(true);
+
     try {
-      setCustodians((prev) => prev.filter((c) => c._id !== itemToDelete._id));
-      toast.success("Rule unassigned successfully from active registry");
-      onDeleteOpenChange();
+      await dispatch(
+        deleteCustodian(itemToDelete._id),
+      ).unwrap();
+
+      toast.success(
+        "Custodian mapping deleted successfully!",
+      );
+
+      onDeleteClose();
+
       setItemToDelete(null);
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to remove custodian rule");
+
+      if (
+        custodianList.length === 1 &&
+        page > 1
+      ) {
+        setPage((previousPage) => previousPage - 1);
+      } else {
+        loadCustodians();
+      }
+    } catch (error: any) {
+      toast.error(
+        typeof error === "string"
+          ? error
+          : error?.message ||
+            "Failed to delete custodian mapping",
+      );
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Filter Active Officers - Intelligent matching: agar exact designation na mile toh empty nahi karega
-  const filteredOfficers = useMemo(() => {
-    if (!Array.isArray(staffUsers) || staffUsers.length === 0) return [];
-    if (!selectedDesignation) return staffUsers;
+  // =======================================================
+  // PAGINATION
+  // =======================================================
 
-    const target = selectedDesignation.toLowerCase().trim();
-    const matched = staffUsers.filter((u) => {
-      const userDesig = u.designationAndWing?.designation?.toLowerCase().trim() || "";
-      const userRole = u.assignedRole?.toLowerCase().trim() || "";
-      return userDesig.includes(target) || target.includes(userDesig) || userRole.includes(target);
-    });
+  const totalPages = Math.max(
+    1,
+    Math.ceil(totalCount / ROWS_PER_PAGE),
+  );
 
-    // Fallback: Agar filter se 0 bane, toh saare active users render karein taaki user block na ho!
-    return matched.length > 0 ? matched : staffUsers;
-  }, [staffUsers, selectedDesignation]);
+  const showingFrom =
+    totalCount === 0
+      ? 0
+      : (page - 1) * ROWS_PER_PAGE + 1;
 
-  const categoryFilterItems: SelectOption[] = useMemo(() => {
-    return [
-      { key: "ALL", label: "All Master Categories" },
-      ...categories.map((c) => ({
-        key: c._id,
-        label: c.categoryName,
-      })),
-    ];
-  }, [categories]);
+  const showingTo = Math.min(
+    page * ROWS_PER_PAGE,
+    totalCount,
+  );
 
-  const categorySelectItems: SelectOption[] = useMemo(() => {
-    return categories.map((c) => ({
-      key: c._id,
-      label: c.categoryName,
-    }));
-  }, [categories]);
+  // =======================================================
+  // SEARCH AND FILTER
+  // =======================================================
 
-  const subjectSelectItems: SelectOption[] = useMemo(() => {
-    return subjects.map((s) => ({
-      key: s._id,
-      label: s.subjectTitle,
-    }));
-  }, [subjects]);
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setPage(1);
+  };
 
-  const designationSelectItems: SelectOption[] = useMemo(() => {
-    return designations.map((d) => ({
-      key: d.title,
-      label: d.title,
-    }));
-  }, [designations]);
+  const handleCategoryFilterChange = (
+    value: string,
+  ) => {
+    setSelectedCategoryFilter(value || "ALL");
+    setPage(1);
+  };
 
-  const officerSelectItems: SelectOption[] = useMemo(() => {
-    return filteredOfficers.map((u) => ({
-      key: u.officerName,
-      label: `${u.officerName} (${u.designationAndWing?.designation || u.assignedRole || "Staff"})`,
-    }));
-  }, [filteredOfficers]);
+  // =======================================================
+  // TABLE RELATION LABELS
+  // =======================================================
 
-  const filteredMappings = useMemo(() => {
-    return custodians.filter((item) => {
-      const catName = item.categoryId?.categoryName || "";
-      const catId = item.categoryId?._id || "";
-      const subTitle = item.subjectId?.subjectTitle || "";
-      const offName = item.officerName || "";
-      const desig = item.designation || "";
+  const getOfficerName = (
+    item: ICustodianRecord,
+  ) => {
+    const record =
+      item as unknown as Record<string, unknown>;
 
-      const matchesCategory =
-        selectedCategoryFilter === "ALL" ||
-        catId === selectedCategoryFilter ||
-        catName === selectedCategoryFilter;
+    const populatedName = getRelationLabel(
+      record.userId,
+      [
+        "officerName",
+        "fullName",
+        "name",
+        "username",
+      ],
+    );
 
-      const matchesSearch =
-        subTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        offName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        desig.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        catName.toLowerCase().includes(searchQuery.toLowerCase());
+    if (populatedName !== "--") {
+      return populatedName;
+    }
 
-      return matchesCategory && matchesSearch;
-    });
-  }, [custodians, selectedCategoryFilter, searchQuery]);
+    const userId = getRelationId(record.userId);
 
-  const totalPages = Math.ceil(filteredMappings.length / rowsPerPage) || 1;
-  const paginatedMappings = useMemo(() => {
-    const start = (page - 1) * rowsPerPage;
-    return filteredMappings.slice(start, start + rowsPerPage);
-  }, [filteredMappings, page, rowsPerPage]);
+    const matchedUser = staffUsers.find(
+      (user) => user._id === userId,
+    );
+
+    return matchedUser?.officerName || "--";
+  };
+
+  const getDesignationName = (
+    item: ICustodianRecord,
+  ) => {
+    const record =
+      item as unknown as Record<string, unknown>;
+
+    const populatedName = getRelationLabel(
+      record.designationId,
+      [
+        "title",
+        "designation",
+        "name",
+      ],
+    );
+
+    if (populatedName !== "--") {
+      return populatedName;
+    }
+
+    const designationId = getRelationId(
+      record.designationId,
+    );
+
+    const matchedDesignation = designations.find(
+      (designation) =>
+        designation._id === designationId,
+    );
+
+    return matchedDesignation?.title || "--";
+  };
+
+  // =======================================================
+  // RENDER
+  // =======================================================
 
   return (
     <div className="space-y-4">
-      {/* 1. Header Information Bar */}
-      <Card shadow="none" className="border border-slate-200/80 bg-white">
+
+      {/* HEADER AND FILTERS */}
+
+      <Card
+        shadow="none"
+        className="border border-slate-200/80 bg-white"
+      >
         <CardBody className="p-4">
+
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+
             <div>
               <div className="flex items-center gap-2">
+
                 <Link href="/admin/masters">
-                  <Button isIconOnly size="sm" variant="light" className="text-slate-500">
-                    <span className="material-symbols-rounded">arrow_back</span>
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="light"
+                    className="text-slate-500"
+                  >
+                    <span className="material-symbols-rounded">
+                      arrow_back
+                    </span>
                   </Button>
                 </Link>
+
                 <h1 className="text-base font-bold text-slate-900">
                   7.7 Subject-Wise Officer Custodian Mapping
                 </h1>
-                <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
+
+                <Chip
+                  size="sm"
+                  className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700"
+                >
                   Auto-Routing Enabled
                 </Chip>
+
               </div>
-              <p className="text-xs text-slate-500 ml-9">
-                Maps incoming writ subjects directly to the active directory staff member and official designation
+
+              <p className="ml-9 text-xs text-slate-500">
+                Maps incoming writ subjects directly to the active
+                directory staff member and official designation
               </p>
             </div>
+
             <Button
               size="sm"
               radius="sm"
               className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
-              startContent={<span className="material-symbols-rounded text-sm">add</span>}
+              startContent={
+                <span className="material-symbols-rounded text-sm">
+                  add
+                </span>
+              }
               onPress={handleOpenAdd}
             >
               Assign New Custodian
             </Button>
+
           </div>
 
-          {/* Filters Bar */}
+          {/* FILTER BAR */}
+
           <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
+
             <Input
               size="sm"
               radius="sm"
               placeholder="Search subject, custodian officer or designation..."
               value={searchQuery}
-              onValueChange={(val) => {
-                setSearchQuery(val);
-                setPage(1);
-              }}
-              startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
+              onValueChange={handleSearchChange}
+              startContent={
+                <span className="material-symbols-rounded text-sm text-slate-400">
+                  search
+                </span>
+              }
               className="bg-slate-50 sm:col-span-2"
             />
+
             <Select
               size="sm"
               radius="sm"
@@ -374,296 +821,529 @@ export default function CustodianMappingPage() {
               placeholder="Filter by Category"
               items={categoryFilterItems}
               selectedKeys={[selectedCategoryFilter]}
-              onChange={(e) => {
-                setSelectedCategoryFilter(e.target.value || "ALL");
-                setPage(1);
-              }}
+              onChange={(event) =>
+                handleCategoryFilterChange(
+                  event.target.value,
+                )
+              }
               className="bg-slate-50 font-semibold"
             >
-              {(item: SelectOption) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+              {(item: SelectOption) => (
+                <SelectItem key={item.key}>
+                  {item.label}
+                </SelectItem>
+              )}
             </Select>
+
           </div>
         </CardBody>
       </Card>
 
-      {/* 2. Main Mappings Table */}
-      <Card shadow="none" className="border border-slate-200/80 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-100 p-4">
+      {/* MAIN TABLE */}
+
+      <Card
+        shadow="none"
+        className="border border-slate-200/80 bg-white"
+      >
+
+        <div className="flex flex-col justify-between gap-2 border-b border-slate-100 p-4 sm:flex-row sm:items-center">
+
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Active Subject-Officer Bindings ({filteredMappings.length} Rules)
+            Active Subject-Officer Bindings ({totalCount} Rules)
           </h3>
-          <span className="text-[11px] text-slate-400">Drives 4.0 Green Sheet Routing Engine</span>
+
+          <span className="text-[11px] text-slate-400">
+            Drives 4.0 Green Sheet Routing Engine
+          </span>
+
         </div>
 
         <CardBody className="p-0">
+
           <Table
             removeWrapper
             aria-label="Custodian Mapping Table"
             className="min-w-full"
             bottomContent={
               totalPages > 1 ? (
-                <div className="flex w-full justify-between items-center p-3 border-t border-slate-100">
+                <div className="flex w-full items-center justify-between border-t border-slate-100 p-3">
+
                   <span className="text-xs text-slate-500">
-                    Showing {(page - 1) * rowsPerPage + 1} to{" "}
-                    {Math.min(page * rowsPerPage, filteredMappings.length)} of {filteredMappings.length}
+                    Showing {showingFrom} to {showingTo} of {totalCount}
                   </span>
+
                   <Pagination
                     isCompact
                     showControls
                     color="primary"
                     page={page}
                     total={totalPages}
-                    onChange={(p) => setPage(p)}
+                    onChange={setPage}
                   />
+
                 </div>
               ) : null
             }
           >
+
             <TableHeader>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                S.NO
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                CATEGORY
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                LITIGATION SUBJECT MATTER
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                CUSTODIAN OFFICER (STAFF)
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                OFFICIAL DESIGNATION
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
-                ACTION
-              </TableColumn>
+
+              <TableColumn>S.NO</TableColumn>
+              <TableColumn>CATEGORY</TableColumn>
+              <TableColumn>LITIGATION SUBJECT MATTER</TableColumn>
+              <TableColumn>CUSTODIAN OFFICER (STAFF)</TableColumn>
+              <TableColumn>OFFICIAL DESIGNATION</TableColumn>
+              <TableColumn className="text-center">ACTION</TableColumn>
+
             </TableHeader>
+
             <TableBody
-              items={paginatedMappings}
+              items={custodianList}
+              isLoading={loading}
+              loadingContent={
+                <div className="flex items-center justify-center gap-2 py-6 text-slate-500">
+                  <Spinner size="sm" />
+                  Loading custodian rules...
+                </div>
+              }
               emptyContent={
-                loading ? (
-                  <div className="py-6 flex justify-center items-center gap-2 text-slate-500">
-                    <Spinner size="sm" /> Loading custodian rules...
-                  </div>
-                ) : (
-                  "No custodian rules match the selected filter."
-                )
+                loading
+                  ? " "
+                  : "No custodian rules match the selected filter."
               }
             >
+
               {(item) => {
-                const index = (page - 1) * rowsPerPage + paginatedMappings.indexOf(item) + 1;
-                const catName = item.categoryId?.categoryName || "--";
-                const subTitle = item.subjectId?.subjectTitle || "--";
+                const record =
+                  item as unknown as Record<string, unknown>;
+
+                const categoryName = getRelationLabel(
+                  record.categoryId,
+                  ["categoryName"],
+                );
+
+                const subjectTitle = getRelationLabel(
+                  record.subjectId,
+                  ["subjectTitle"],
+                );
+
+                const rowIndex =
+                  (page - 1) * ROWS_PER_PAGE +
+                  custodianList.indexOf(item) +
+                  1;
 
                 return (
-                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                    <TableCell className="text-xs font-bold text-slate-400">{index}</TableCell>
+                  <TableRow
+                    key={item._id}
+                    className="border-b border-slate-100 hover:bg-slate-50/70"
+                  >
+
+                    <TableCell className="text-xs font-bold text-slate-400">
+                      {rowIndex}
+                    </TableCell>
+
                     <TableCell>
                       <Chip
                         size="sm"
                         variant="flat"
                         color={
-                          catName === "Direct Recruitment"
+                          categoryName === "Direct Recruitment"
                             ? "primary"
-                            : catName === "Departmental Promotion"
-                            ? "secondary"
-                            : "default"
+                            : categoryName === "Departmental Promotion"
+                              ? "secondary"
+                              : "default"
                         }
                         className="text-[10px] font-bold"
                       >
-                        {catName}
+                        {categoryName}
                       </Chip>
                     </TableCell>
-                    <TableCell className="text-xs font-bold text-slate-900 max-w-[280px]">
-                      {subTitle}
+
+                    <TableCell className="max-w-[280px] text-xs font-bold text-slate-900">
+                      {subjectTitle}
                     </TableCell>
+
                     <TableCell className="text-xs font-semibold text-blue-900">
-                      {item.officerName}
+                      {getOfficerName(item)}
                     </TableCell>
-                    <TableCell className="text-xs text-slate-600 font-medium">
-                      {item.designation}
+
+                    <TableCell className="text-xs font-medium text-slate-600">
+                      {getDesignationName(item)}
                     </TableCell>
-                    <TableCell className="text-center">
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="light"
-                        className="text-slate-400 hover:text-rose-600"
-                        onPress={() => handleOpenDelete(item)}
-                      >
-                        <span className="material-symbols-rounded text-sm">delete</span>
-                      </Button>
+
+                    <TableCell>
+                      <div className="flex items-center justify-center gap-1">
+
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="light"
+                          className="text-slate-400 hover:text-blue-700"
+                          aria-label="Edit custodian mapping"
+                          onPress={() => handleOpenEdit(item)}
+                        >
+                          <span className="material-symbols-rounded text-sm">
+                            edit
+                          </span>
+                        </Button>
+
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="light"
+                          className="text-slate-400 hover:text-rose-600"
+                          aria-label="Delete custodian mapping"
+                          onPress={() => handleOpenDelete(item)}
+                        >
+                          <span className="material-symbols-rounded text-sm">
+                            delete
+                          </span>
+                        </Button>
+
+                      </div>
                     </TableCell>
+
                   </TableRow>
                 );
               }}
+
             </TableBody>
           </Table>
+
         </CardBody>
       </Card>
 
-      {/* MODAL: Add New Custodian Rule (Large 3XL Width) */}
-      <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="center" size="3xl">
+      {/* ADD / EDIT MODAL */}
+
+      <Modal
+        isOpen={isAddOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            handleCloseForm();
+          }
+        }}
+        placement="center"
+        size="3xl"
+        isDismissable={!isSubmitting}
+      >
+
         <ModalContent>
-          {(onClose) => (
-            <form onSubmit={handleSubmit(onSaveCustodianMapping)}>
-              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100">
-                <span className="material-symbols-rounded text-blue-700">person_add</span>
-                Map Subject to Legal Custodian
-              </ModalHeader>
-              <ModalBody className="py-4 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Controller
-                    name="categoryId"
-                    control={control}
-                    render={({ field }) => (
-                      <div>
-                        <label className="text-xs font-semibold text-slate-700 block mb-1">
-                          Select Case Category <span className="text-red-500">*</span>
-                        </label>
-                        <Select
-                          size="sm"
-                          placeholder="Choose Parent Category"
-                          items={categorySelectItems}
-                          selectedKeys={field.value ? [field.value] : []}
-                          onChange={(e) => handleCategorySelection(e.target.value)}
-                          isInvalid={!!errors.categoryId}
-                          errorMessage={errors.categoryId?.message}
-                        >
-                          {(c: SelectOption) => <SelectItem key={c.key}>{c.label}</SelectItem>}
-                        </Select>
-                      </div>
-                    )}
-                  />
 
-                  <Controller
-                    name="subjectId"
-                    control={control}
-                    render={({ field }) => (
-                      <div>
-                        <label className="text-xs font-semibold text-slate-700 block mb-1">
-                          Select Litigation Subject Matter <span className="text-red-500">*</span>
-                        </label>
-                        <Select
-                          size="sm"
-                          placeholder={subjects.length === 0 ? "Select category first" : "Choose Granular Subject Issue"}
-                          items={subjectSelectItems}
-                          selectedKeys={field.value ? [field.value] : []}
-                          onChange={(e) => field.onChange(e.target.value)}
-                          isInvalid={!!errors.subjectId}
-                          errorMessage={errors.subjectId?.message}
-                          isDisabled={subjects.length === 0}
-                        >
-                          {(s: SelectOption) => <SelectItem key={s.key}>{s.label}</SelectItem>}
-                        </Select>
-                      </div>
-                    )}
-                  />
-                </div>
+          <form onSubmit={handleSubmit(onSaveCustodianMapping)}>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Controller
-                    name="roleOrDesignation"
-                    control={control}
-                    render={({ field }) => (
-                      <div>
-                        <label className="text-xs font-semibold text-slate-700 block mb-1">
-                          Authority Designation / Role <span className="text-red-500">*</span>
-                        </label>
-                        <Select
-                          size="sm"
-                          placeholder="Select Designation"
-                          items={designationSelectItems}
-                          selectedKeys={field.value ? [field.value] : []}
-                          onChange={(e) => {
-                            field.onChange(e.target.value);
-                            setValue("officerName", "");
-                          }}
-                          isInvalid={!!errors.roleOrDesignation}
-                          errorMessage={errors.roleOrDesignation?.message}
-                        >
-                          {(d: SelectOption) => <SelectItem key={d.key}>{d.label}</SelectItem>}
-                        </Select>
-                      </div>
-                    )}
-                  />
+            <ModalHeader className="flex items-center gap-2 border-b border-slate-100 text-sm font-bold text-slate-900">
 
-                  <Controller
-                    name="officerName"
-                    control={control}
-                    render={({ field }) => (
-                      <div>
-                        <label className="text-xs font-semibold text-slate-700 block mb-1">
-                          Custodian Officer (Filtered Staff) <span className="text-red-500">*</span>
-                        </label>
-                        <Select
-                          size="sm"
-                          isLoading={usersLoading}
-                          placeholder={officerSelectItems.length === 0 ? "Loading active officers..." : "Select Active Staff User"}
-                          items={officerSelectItems}
-                          selectedKeys={field.value ? [field.value] : []}
-                          onChange={(e) => field.onChange(e.target.value)}
-                          isInvalid={!!errors.officerName}
-                          errorMessage={errors.officerName?.message}
-                        >
-                          {(officer: SelectOption) => <SelectItem key={officer.key}>{officer.label}</SelectItem>}
-                        </Select>
-                      </div>
-                    )}
-                  />
-                </div>
-              </ModalBody>
-              <ModalFooter className="border-t border-slate-100">
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  type="submit"
-                  radius="sm"
-                  className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                  isLoading={isSubmitting}
-                >
-                  Save Mapping
-                </Button>
-              </ModalFooter>
-            </form>
-          )}
+              <span className="material-symbols-rounded text-blue-700">
+                {editingItem ? "edit" : "person_add"}
+              </span>
+
+              {editingItem
+                ? "Update Subject Custodian Mapping"
+                : "Map Subject to Legal Custodian"}
+
+            </ModalHeader>
+
+            <ModalBody className="space-y-4 py-4">
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+
+                {/* CATEGORY */}
+
+                <Controller
+                  name="categoryId"
+                  control={control}
+                  render={({ field }) => (
+                    <div>
+
+                      <label className="mb-1 block text-xs font-semibold text-slate-700">
+                        Select Case Category *
+                      </label>
+
+                      <Select
+                        size="sm"
+                        placeholder="Choose Parent Category"
+                        items={categorySelectItems}
+                        isLoading={categoriesLoading}
+                        selectedKeys={
+                          field.value ? [field.value] : []
+                        }
+                        onChange={(event) =>
+                          handleCategorySelection(
+                            event.target.value,
+                            field.onChange,
+                          )
+                        }
+                        onBlur={field.onBlur}
+                        isInvalid={!!errors.categoryId}
+                        errorMessage={errors.categoryId?.message}
+                      >
+                        {(category: SelectOption) => (
+                          <SelectItem key={category.key}>
+                            {category.label}
+                          </SelectItem>
+                        )}
+                      </Select>
+
+                    </div>
+                  )}
+                />
+
+                {/* SUBJECT */}
+
+                <Controller
+                  name="subjectId"
+                  control={control}
+                  render={({ field }) => (
+                    <div>
+
+                      <label className="mb-1 block text-xs font-semibold text-slate-700">
+                        Select Litigation Subject Matter *
+                      </label>
+
+                      <Select
+                        size="sm"
+                        placeholder={
+                          !selectedCategoryId
+                            ? "Select category first"
+                            : "Choose Granular Subject Issue"
+                        }
+                        items={subjectSelectItems}
+                        isLoading={subjectsLoading}
+                        selectedKeys={
+                          field.value ? [field.value] : []
+                        }
+                        onSelectionChange={(keys) => {
+                          const selectedValue =
+                            keys === "all"
+                              ? ""
+                              : Array.from(keys)[0]?.toString() || "";
+
+                          field.onChange(selectedValue);
+                          trigger("subjectId");
+                        }}
+                        onBlur={field.onBlur}
+                        isInvalid={!!errors.subjectId}
+                        errorMessage={errors.subjectId?.message}
+                        isDisabled={
+                          !selectedCategoryId ||
+                          subjectsLoading ||
+                          subjects.length === 0
+                        }
+                      >
+                        {(subject: SelectOption) => (
+                          <SelectItem key={subject.key}>
+                            {subject.label}
+                          </SelectItem>
+                        )}
+                      </Select>
+
+                    </div>
+                  )}
+                />
+
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+
+                {/* DESIGNATION */}
+
+                <Controller
+                  name="designationId"
+                  control={control}
+                  render={({ field }) => (
+                    <div>
+
+                      <label className="mb-1 block text-xs font-semibold text-slate-700">
+                        Authority Designation / Role *
+                      </label>
+
+                      <Select
+                        size="sm"
+                        placeholder="Select Designation"
+                        items={designationSelectItems}
+                        isLoading={designationsLoading}
+                        selectedKeys={
+                          field.value ? [field.value] : []
+                        }
+                        onChange={(event) => {
+                          field.onChange(event.target.value);
+
+                          setValue("userId", "", {
+                            shouldValidate: true,
+                            shouldDirty: true,
+                          });
+                        }}
+                        onBlur={field.onBlur}
+                        isInvalid={!!errors.designationId}
+                        errorMessage={errors.designationId?.message}
+                      >
+                        {(designation: SelectOption) => (
+                          <SelectItem key={designation.key}>
+                            {designation.label}
+                          </SelectItem>
+                        )}
+                      </Select>
+
+                    </div>
+                  )}
+                />
+
+                {/* OFFICER */}
+
+                <Controller
+                  name="userId"
+                  control={control}
+                  render={({ field }) => (
+                    <div>
+
+                      <label className="mb-1 block text-xs font-semibold text-slate-700">
+                        Custodian Officer (Filtered Staff) *
+                      </label>
+
+                      <Select
+                        size="sm"
+                        placeholder="Select Active Staff User"
+                        items={officerSelectItems}
+                        selectedKeys={
+                          field.value ? [field.value] : []
+                        }
+                        onChange={(event) => {
+                          field.onChange(event.target.value);
+                        }}
+                        onBlur={field.onBlur}
+                        isInvalid={!!errors.userId}
+                        errorMessage={errors.userId?.message}
+                        isDisabled={!staffUsers.length}
+                      >
+                        {(officer: SelectOption) => (
+                          <SelectItem key={officer.key}>
+                            {officer.label}
+                          </SelectItem>
+                        )}
+                      </Select>
+
+                    </div>
+                  )}
+                />
+
+              </div>
+
+            </ModalBody>
+
+            <ModalFooter className="border-t border-slate-100">
+
+              <Button
+                size="sm"
+                variant="bordered"
+                radius="sm"
+                onPress={handleCloseForm}
+                isDisabled={isSubmitting}
+              >
+                Cancel
+              </Button>
+
+              <Button
+                size="sm"
+                type="submit"
+                radius="sm"
+                className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                isLoading={isSubmitting}
+              >
+                {editingItem
+                  ? "Update Mapping"
+                  : "Save Mapping"}
+              </Button>
+
+            </ModalFooter>
+
+          </form>
+
         </ModalContent>
       </Modal>
 
-      {/* MODAL: Delete Confirmation */}
-      <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
+      {/* DELETE CONFIRMATION MODAL */}
+
+      <Modal
+        isOpen={isDeleteOpen}
+        onOpenChange={(open) => {
+          if (!open && !isSubmitting) {
+            onDeleteClose();
+            setItemToDelete(null);
+          }
+        }}
+        placement="center"
+        size="sm"
+        isDismissable={!isSubmitting}
+      >
+
         <ModalContent>
+
           {(onClose) => (
             <>
-              <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span className="material-symbols-rounded text-rose-600">warning</span>
+
+              <ModalHeader className="flex items-center gap-2 text-sm font-bold text-slate-900">
+
+                <span className="material-symbols-rounded text-rose-600">
+                  warning
+                </span>
+
                 Confirm Deletion
+
               </ModalHeader>
+
               <ModalBody className="text-xs text-slate-600">
+
                 Are you sure you want to remove the custodian rule for{" "}
-                <b>{itemToDelete?.subjectId?.subjectTitle || "this subject"}</b>? Newly registered petitions on this issue will not be auto-routed.
+
+                <b>
+                  {itemToDelete
+                    ? getRelationLabel(
+                        (
+                          itemToDelete as unknown as Record<
+                            string,
+                            unknown
+                          >
+                        ).subjectId,
+                        ["subjectTitle"],
+                      )
+                    : "this subject"}
+                </b>
+
+                ? Newly registered petitions on this issue will not be
+                auto-routed.
+
               </ModalBody>
+
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
+
+                <Button
+                  size="sm"
+                  variant="bordered"
+                  radius="sm"
+                  onPress={onClose}
+                  isDisabled={isSubmitting}
+                >
                   Cancel
                 </Button>
+
                 <Button
                   size="sm"
                   radius="sm"
                   className="bg-rose-600 font-semibold text-white hover:bg-rose-700"
-                  onClick={handleConfirmDelete}
+                  onPress={handleConfirmDelete}
                   isLoading={isSubmitting}
                 >
                   Delete Rule
                 </Button>
+
               </ModalFooter>
+
             </>
           )}
+
         </ModalContent>
       </Modal>
+
     </div>
   );
 }

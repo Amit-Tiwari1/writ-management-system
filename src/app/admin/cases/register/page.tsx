@@ -64,20 +64,27 @@ interface CategoryOption extends KeyLabelOption {
 
 interface SubCategoryOption extends KeyLabelOption {
   id?: string;
-  officer?: string;
+  officerId?: string;
 }
 
 interface SubjectOption extends KeyLabelOption {
   id?: string;
 }
 
+const getObjectId = (value: any): string => {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && value._id) {
+    return String(value._id);
+  }
+  return "";
+};
 const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_OPTIONS: KeyLabelOption[] = Array.from(
   { length: CURRENT_YEAR - 2000 + 1 },
   (_, i) => {
     const y = (CURRENT_YEAR - i).toString();
     return { key: y, label: y };
-  }
+  },
 );
 
 export default function CaseIntakeWizardPage() {
@@ -87,13 +94,18 @@ export default function CaseIntakeWizardPage() {
   const [staffUsers, setStaffUsers] = useState<StaffUserItem[]>([]);
   const [loadingDropdowns, setLoadingDropdowns] = useState<boolean>(true);
   const [isResolving, setIsResolving] = useState<boolean>(false);
-  const [isCheckingDuplicate, setIsCheckingDuplicate] = useState<boolean>(false);
+  const [isCheckingDuplicate, setIsCheckingDuplicate] =
+    useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const [subCategoryOptions, setSubCategoryOptions] = useState<SubCategoryOption[]>([]);
+  const [subCategoryOptions, setSubCategoryOptions] = useState<
+    SubCategoryOption[]
+  >([]);
   const [subjectOptions, setSubjectOptions] = useState<SubjectOption[]>([]);
 
-  const [petitionersList, setPetitionersList] = useState<PetitionerItemFormValues[]>([]);
+  const [petitionersList, setPetitionersList] = useState<
+    PetitionerItemFormValues[]
+  >([]);
   const [newPetitioner, setNewPetitioner] = useState<PetitionerItemFormValues>({
     rollNo: "",
     registrationNo: "",
@@ -170,235 +182,353 @@ export default function CaseIntakeWizardPage() {
 
   const fetchSubjects = useCallback(
     async (subCategoryId: string) => {
+      setSubjectOptions([]);
+      setValue("disputeSubject", "");
+      setValue("subjectId", "");
+
+      if (!subCategoryId) return;
+
       try {
-        const res = await MastersAPI.getSubjects({ subCategoryId, limit: 100 });
+        const res = await MastersAPI.getSubjects({
+          subCategoryId,
+          limit: 100,
+        });
+
         if (res?.success && Array.isArray(res.data)) {
-          const mapped: SubjectOption[] = res.data.map((item: any) => ({
-            key: item.subjectTitle,
-            label: item.subjectTitle,
-            id: item._id,
-          }));
+          const mapped: SubjectOption[] = res.data
+            .filter((item: any) => item?._id && item?.subjectTitle)
+            .map((item: any) => ({
+              key: String(item.subjectTitle),
+              label: String(item.subjectTitle),
+              id: String(item._id),
+            }));
+
           setSubjectOptions(mapped);
-          if (mapped.length > 0) {
+
+          if (mapped.length === 1) {
             setValue("disputeSubject", mapped[0].key);
-            setValue("subjectId", mapped[0].id);
+            setValue("subjectId", mapped[0].id || "");
           }
         }
       } catch (err) {
         console.error("Failed to load subjects:", err);
+        toast.error("Unable to load subjects for selected subcategory.");
       }
     },
-    [setValue]
+    [setValue],
   );
 
   const fetchSubCategories = useCallback(
     async (categoryId: string) => {
+      setSubCategoryOptions([]);
+      setSubjectOptions([]);
+
+      setValue("subCategory", "");
+      setValue("subCategoryId", "");
+      setValue("disputeSubject", "");
+      setValue("subjectId", "");
+
+      if (!categoryId) return;
+
       try {
-        const res = await MastersAPI.getSubCategories({ categoryId, limit: 100 });
+        const res = await MastersAPI.getSubCategories({
+          categoryId,
+          limit: 100,
+        });
+
         if (res?.success && Array.isArray(res.data)) {
-          const mapped: SubCategoryOption[] = res.data.map((item: any) => ({
-            key: item.subCategoryName,
-            label: item.subCategoryName,
-            id: item._id,
-            officer: item.defaultOfficerName,
-          }));
+          const mapped: SubCategoryOption[] = res.data
+            .filter((item: any) => item?._id && item?.subCategoryName)
+            .map((item: any) => ({
+              key: String(item.subCategoryName),
+              label: String(item.subCategoryName),
+              id: String(item._id),
+              officerId: getObjectId(item.defaultOfficerId),
+            }));
+
           setSubCategoryOptions(mapped);
-          if (mapped.length > 0) {
+
+          // Automatically select only when exactly one option exists.
+          if (mapped.length === 1) {
             const firstSub = mapped[0];
+
             setValue("subCategory", firstSub.key);
-            setValue("subCategoryId", firstSub.id);
-            if (firstSub.officer && firstSub.officer !== "--") {
-              setValue("assignedOIC", firstSub.officer);
+            setValue("subCategoryId", firstSub.id || "");
+
+            if (firstSub.officerId) {
+              setValue("assignedOIC", firstSub.officerId);
             }
+
             if (firstSub.id) {
-              fetchSubjects(firstSub.id);
+              await fetchSubjects(firstSub.id);
             }
-          } else {
-            setSubCategoryOptions([]);
-            setSubjectOptions([]);
           }
         }
       } catch (err) {
         console.error("Failed to load subcategories:", err);
+        toast.error("Unable to load subcategories for selected category.");
       }
     },
-    [fetchSubjects, setValue]
+    [fetchSubjects, setValue],
   );
 
   useEffect(() => {
+    let isMounted = true;
+
     async function loadData() {
       setLoadingDropdowns(true);
+
       try {
         const [mastersRes, usersRes] = await Promise.all([
           MastersAPI.getIntakeDropdowns(),
-          AdminAPI.getUsersList({ limit: 100, status: "ACTIVE" }),
+          AdminAPI.getUsersList({
+            limit: 100,
+            status: "ACTIVE",
+          }),
         ]);
 
+        if (!isMounted) return;
+
         if (mastersRes?.success && mastersRes.data) {
-          setDropdowns(mastersRes.data);
-          if (mastersRes.data.categories?.length > 0) {
-            const firstCat = mastersRes.data.categories[0];
-            setValue("category", firstCat.categoryName);
-            setValue("categoryId", firstCat._id);
-            fetchSubCategories(firstCat._id);
-          }
-          if (mastersRes.data.courts?.length > 0) {
-            const firstCourt = mastersRes.data.courts[0];
+          const masters = mastersRes.data;
+
+          setDropdowns(masters);
+
+          // Default Court
+          const firstCourt = masters.courts?.find((item: any) => item?._id);
+
+          if (firstCourt) {
+            const courtId = String(firstCourt._id);
+
             setValue("court", firstCourt.courtName);
-            setValue("courtId", firstCourt._id);
-            setValue("courtCode", firstCourt.shortCode);
+            setValue("courtId", courtId);
+            setValue("courtCode", firstCourt.shortCode || "");
+
+            const location = String(firstCourt.location || "").toLowerCase();
+
             setValue(
               "benchLocation",
-              firstCourt.location?.toLowerCase().includes("lucknow") ? "Lucknow" : "Allahabad"
+              location.includes("lucknow")
+                ? "Lucknow"
+                : location.includes("new delhi")
+                  ? "New Delhi"
+                  : "Allahabad",
             );
+
+            // Select a case type belonging to the selected court.
+            const firstCaseType = masters.caseTypes?.find(
+              (item: any) => item?._id && getObjectId(item.courtId) === courtId,
+            );
+
+            if (firstCaseType) {
+              setValue(
+                "caseType",
+                firstCaseType.shortName || firstCaseType.caseTypeName,
+              );
+              setValue("caseTypeId", String(firstCaseType._id));
+            } else {
+              setValue("caseTypeId", "");
+            }
+          }
+
+          // Default Category
+          const firstCategory = masters.categories?.find(
+            (item: any) => item?._id,
+          );
+
+          if (firstCategory) {
+            setValue("category", firstCategory.categoryName);
+            setValue("categoryId", String(firstCategory._id));
+
+            await fetchSubCategories(String(firstCategory._id));
           }
         }
 
         if (usersRes?.success && Array.isArray(usersRes.data)) {
-          setStaffUsers(usersRes.data);
-          if (usersRes.data.length > 0) {
-            setValue("assignedOIC", usersRes.data[0].officerName);
-            setValue("assignedPairokar", usersRes.data[0].officerName);
+          const validUsers = usersRes.data.filter(
+            (user: any) => user?._id && user?.officerName,
+          );
+
+          setStaffUsers(validUsers);
+
+          // Do not select the same person automatically for both roles.
+          if (validUsers.length > 0) {
+            setValue("assignedOIC", String(validUsers[0]._id));
+          }
+
+          if (validUsers.length > 1) {
+            setValue("assignedPairokar", String(validUsers[1]._id));
           }
         }
       } catch (err) {
         console.error("Failed to load intake dependencies:", err);
+        toast.error("Unable to load master data or active staff.");
       } finally {
-        setLoadingDropdowns(false);
+        if (isMounted) {
+          setLoadingDropdowns(false);
+        }
       }
     }
+
     loadData();
+
+    return () => {
+      isMounted = false;
+    };
   }, [fetchSubCategories, setValue]);
 
+  const selectedCourtId = watch("courtId");
+
   const oicOptions: KeyLabelOption[] = useMemo(() => {
-    if (!staffUsers || staffUsers.length === 0) {
-      return [
-        { key: "Dr. Arvind Chaturvedi", label: "Dr. Arvind Chaturvedi (Member Secretary / SP Legal)" },
-        { key: "Rajeshwar Singh", label: "Rajeshwar Singh (Officer-in-Charge / DySP)" },
-      ];
-    }
-    return staffUsers.map((u: StaffUserItem) => {
-      const designation = u.designationAndWing?.designation || u.assignedRole || "Staff";
-      return {
-        key: u.officerName,
-        label: `${u.officerName} (${designation})`,
-      };
-    });
+    return staffUsers
+      .filter((user: any) => user?._id && user?.officerName)
+      .map((user: any) => {
+        const designation =
+          user.designationAndWing?.designation || user.assignedRole || "Staff";
+
+        return {
+          key: String(user._id),
+          label: `${user.officerName} (${designation})`,
+        };
+      });
   }, [staffUsers]);
 
   const courtOptions: CourtOption[] = useMemo(() => {
-    if (!dropdowns?.courts || dropdowns.courts.length === 0) {
-      return [
-        { key: "High Court of Judicature at Allahabad", label: "High Court Allahabad (HC-ALD)", code: "HC-ALD", bench: "Allahabad", id: "" },
-        { key: "High Court Allahabad (Lucknow Bench)", label: "High Court Lucknow (HC-LKO)", code: "HC-LKO", bench: "Lucknow", id: "" },
-        { key: "State Public Services Tribunal", label: "Tribunal Lucknow (SPST-LKO)", code: "SPST-LKO", bench: "Lucknow", id: "" },
-      ];
-    }
-    return dropdowns.courts.map((courtItem: any) => ({
-      key: courtItem.courtName,
-      label: `${courtItem.courtName} (${courtItem.shortCode})`,
-      code: courtItem.shortCode,
-      bench: courtItem.location?.toLowerCase().includes("lucknow") ? "Lucknow" : "Allahabad",
-      id: courtItem._id,
-    }));
+    return (dropdowns?.courts || [])
+      .filter((court: any) => court?._id && court?.courtName)
+      .map((court: any) => {
+        const location = String(court.location || "").toLowerCase();
+
+        const bench: CourtOption["bench"] = location.includes("lucknow")
+          ? "Lucknow"
+          : location.includes("new delhi")
+            ? "New Delhi"
+            : "Allahabad";
+
+        return {
+          key: String(court.courtName),
+          label: `${court.courtName} (${court.shortCode || ""})`,
+          code: court.shortCode || "",
+          bench,
+          id: String(court._id),
+        };
+      });
   }, [dropdowns]);
 
   const caseTypeOptions: CaseTypeOption[] = useMemo(() => {
-    if (!dropdowns?.caseTypes || dropdowns.caseTypes.length === 0) {
-      return [
-        { key: "WRIT-A", label: "WRIT - A (Service Single Bench)", id: "" },
-        { key: "SPL-A", label: "SPECIAL APPEAL (Division Bench)", id: "" },
-        { key: "CONT-APP", label: "CONTEMPT APPLICATION (CIVIL)", id: "" },
-      ];
-    }
-    return dropdowns.caseTypes.map((ct: any) => ({
-      key: ct.shortName || ct.caseTypeName,
-      label: `${ct.caseTypeName} (${ct.shortName || ""})`,
-      id: ct._id,
-    }));
-  }, [dropdowns]);
+    if (!selectedCourtId) return [];
+
+    return (dropdowns?.caseTypes || [])
+      .filter(
+        (item: any) =>
+          item?._id && getObjectId(item.courtId) === selectedCourtId,
+      )
+      .map((item: any) => ({
+        key: item.shortName || item.caseTypeName,
+        label: `${item.caseTypeName} (${item.shortName || ""})`,
+        id: String(item._id),
+      }));
+  }, [dropdowns, selectedCourtId]);
 
   const wingOptions: WingOption[] = useMemo(() => {
-    if (!dropdowns?.departments || dropdowns.departments.length === 0) {
-      return [
-        { key: "Recruitment Wing", label: "Recruitment Wing", id: "" },
-        { key: "Legal Cell (High Court Wing)", label: "Legal Cell (High Court Wing)", id: "" },
-        { key: "PAC Recruitment Wing", label: "PAC Recruitment Wing", id: "" },
-      ];
-    }
-    return dropdowns.departments.map((dep: any) => ({
-      key: dep.unitName,
-      label: dep.unitName,
-      id: dep._id,
-    }));
+    return (dropdowns?.departments || [])
+      .filter((item: any) => item?._id && item?.unitName)
+      .map((item: any) => ({
+        key: item.unitName,
+        label: item.unitName,
+        id: String(item._id),
+      }));
   }, [dropdowns]);
 
   const categoryOptions: CategoryOption[] = useMemo(() => {
-    if (!dropdowns?.categories || dropdowns.categories.length === 0) return [];
-    return dropdowns.categories.map((cat: any) => ({
-      key: cat.categoryName,
-      label: cat.categoryName,
-      id: cat._id,
-    }));
+    return (dropdowns?.categories || [])
+      .filter((item: any) => item?._id && item?.categoryName)
+      .map((item: any) => ({
+        key: item.categoryName,
+        label: item.categoryName,
+        id: String(item._id),
+      }));
   }, [dropdowns]);
 
   const districtOptions: KeyLabelOption[] = useMemo(() => {
-    if (!dropdowns?.districts || dropdowns.districts.length === 0) {
-      return [
-        { key: "Lucknow", label: "Lucknow" },
-        { key: "Prayagraj", label: "Prayagraj" },
-        { key: "Meerut", label: "Meerut" },
-        { key: "Unnao", label: "Unnao" },
-        { key: "Pratapgarh", label: "Pratapgarh" },
-      ];
-    }
-    return dropdowns.districts.map((dist: any) => ({
-      key: dist.districtName,
-      label: dist.districtName,
-    }));
+    return (dropdowns?.districts || [])
+      .filter((item: any) => item?._id && item?.districtName)
+      .map((item: any) => ({
+        key: item.districtName,
+        label: item.districtName,
+      }));
   }, [dropdowns]);
 
   const handleResolveData = async () => {
     setIsResolving(true);
+
     try {
       if (watchMode === "CNR") {
-        if (!watchCnrNumber || watchCnrNumber.trim().length !== 16) {
-          toast.error("Please enter a valid 16-Digit CNR Number.");
+        const cnr = (watchCnrNumber || "").trim().toUpperCase();
+
+        if (!/^[A-Z0-9]{16}$/.test(cnr)) {
+          toast.error("Please enter a valid 16-character CNR number.");
           return;
         }
-        const res = await CasesAPI.mockVerifyCNR(watchCnrNumber.trim().toUpperCase());
+
+        const res = await CasesAPI.mockVerifyCNR(cnr);
+
         if (res?.success && res.details) {
           const d = res.details;
-          setValue("court", d.court);
-          setValue("courtCode", d.courtCode);
+
+          setValue("court", d.court || "");
+          setValue("courtCode", d.courtCode || "");
           setValue("benchLocation", d.benchLocation as any);
-          setValue("caseType", d.caseType);
-          setValue("caseNumber", d.caseNumber);
-          setValue("caseYear", d.caseYear || CURRENT_YEAR);
-          setValue("leadPetitioner", d.leadPetitioner);
-          setValue("petitionerAdvocate", d.petitionerAdvocate);
-          setValue("courtRoomNo", d.courtRoomNo);
-          setValue("coramBench", d.coramBench);
-          setValue("ndoh", d.ndoh ? new Date(d.ndoh).toISOString().split("T")[0] : null);
-          toast.success("eCourts CIS record resolved & form populated!", { icon: "⚖️" });
+          setValue("caseType", d.caseType || "");
+          setValue("caseNumber", d.caseNumber || "");
+          setValue("caseYear", Number(d.caseYear) || CURRENT_YEAR);
+          setValue("leadPetitioner", d.leadPetitioner || "");
+          setValue("petitionerAdvocate", d.petitionerAdvocate || "");
+          setValue("courtRoomNo", d.courtRoomNo || "--");
+          setValue("coramBench", d.coramBench || "--");
+          setValue(
+            "ndoh",
+            d.ndoh ? new Date(d.ndoh).toISOString().split("T")[0] : null,
+          );
+
+          toast.success(
+            "Mock CNR lookup completed. Please verify the populated details manually.",
+          );
+        } else {
+          toast.error(res?.message || "CNR details could not be resolved.");
         }
-      } else if (watchMode === "WRIT") {
-        if (!watchCaseNumber) {
+
+        return;
+      }
+
+      if (watchMode === "WRIT") {
+        if (!watchCaseNumber?.trim()) {
           toast.error("Please provide the Court Case Number.");
           return;
         }
-        const prospectiveCNR = `UPHC0100${watchCaseNumber.padStart(4, "0")}${watchCaseYear}`;
-        setValue("cnrNumber", prospectiveCNR);
-        toast.success(`CNR prospective seed mapped: ${prospectiveCNR}`);
-      } else {
-        if (!watchNoticeNumber) {
+
+        toast(
+          "No live WRIT verification is configured. Please enter and verify the case details manually.",
+        );
+
+        return;
+      }
+
+      if (watchMode === "NOTICE") {
+        if (!watchNoticeNumber?.trim()) {
           toast.error("Please enter Advance Notice / Diary Number.");
           return;
         }
-        toast.success("Advance Notice verified against Legal Cell Registry!");
+
+        toast(
+          "Notice number entered. Duplicate checking will run before proceeding.",
+        );
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || "Verification gateway unreachable. Fill manually.");
+      toast.error(
+        err.response?.data?.message ||
+          "Verification service unavailable. Please verify the details manually.",
+      );
     } finally {
       setIsResolving(false);
     }
@@ -407,11 +537,15 @@ export default function CaseIntakeWizardPage() {
   const handleProceedToStep2 = async () => {
     const isValidStep1 = await trigger([
       "court",
+      "courtId",
       "caseType",
+      "caseTypeId",
       "caseYear",
       ...(watchMode === "CNR" ? (["cnrNumber"] as const) : []),
       ...(watchMode === "WRIT" ? (["caseNumber"] as const) : []),
-      ...(watchMode === "NOTICE" ? (["noticeNumber", "noticeYear"] as const) : []),
+      ...(watchMode === "NOTICE"
+        ? (["noticeNumber", "noticeYear"] as const)
+        : []),
     ]);
 
     if (!isValidStep1) {
@@ -419,24 +553,49 @@ export default function CaseIntakeWizardPage() {
       return;
     }
 
-    setIsCheckingDuplicate(true);
-    try {
-      const res = await CasesAPI.checkDuplicate({
-        noticeNumber: watchNoticeNumber,
-        writNumber: watchCaseNumber ? `${watchCaseType} / ${watchCaseNumber} / ${watchCaseYear}` : undefined,
-        cnrNumber: watchCnrNumber,
-      });
+    if (!selectedCourtId || !watch("caseTypeId")) {
+      toast.error("Please select a valid Court and Case Type.");
+      return;
+    }
 
-      if (res?.exists) {
+    const duplicatePayload: {
+      noticeNumber?: string;
+      writNumber?: string;
+      cnrNumber?: string;
+    } = {};
+
+    if (watchMode === "NOTICE") {
+      duplicatePayload.noticeNumber = `${(watchNoticeNumber ?? "").trim()}/${watchNoticeYear}`;
+    } else if (watchMode === "WRIT") {
+      duplicatePayload.writNumber = `${watchCaseType} / ${(watchCaseNumber ?? "").trim()} / ${watchCaseYear}`;
+    } else if (watchMode === "CNR") {
+      duplicatePayload.cnrNumber = (watchCnrNumber ?? "").trim().toUpperCase();
+    }
+
+    setIsCheckingDuplicate(true);
+
+    try {
+      const res = await CasesAPI.checkDuplicate(duplicatePayload);
+
+      if (!res?.success) {
+        toast.error("Duplicate verification failed. Please try again.");
+        return;
+      }
+
+      if (res.exists) {
         toast.error(
-          `Duplicate Alert! File Docket ${res.matchedCase?.fileNo} already exists for this litigation.`,
-          { duration: 6000 }
+          `Duplicate Alert! File Docket ${res.matchedCase?.fileNo || ""} already exists.`,
+          { duration: 6000 },
         );
         return;
       }
+
       setActiveStep(2);
-    } catch {
-      setActiveStep(2);
+    } catch (err: any) {
+      toast.error(
+        err.response?.data?.message ||
+          "Unable to check duplicate records. Please try again.",
+      );
     } finally {
       setIsCheckingDuplicate(false);
     }
@@ -444,17 +603,31 @@ export default function CaseIntakeWizardPage() {
 
   const handleAddPetitioner = () => {
     if (!newPetitioner.rollNo.trim() || !newPetitioner.name.trim()) {
-      toast.error("Candidate Roll No and Name are mandatory (*)");
+      toast.error("Candidate Roll No and Name are mandatory.");
       return;
     }
 
-    if (petitionersList.length === 0 && !watch("leadPetitioner")) {
-      setValue("leadPetitioner", newPetitioner.name.trim());
-      setValue("leadPetitionerRollNo", newPetitioner.rollNo.trim());
-      setValue("leadPetitionerFatherName", newPetitioner.fatherName || "--");
+    const normalizedRollNo = newPetitioner.rollNo.trim().toLowerCase();
+    const alreadyExists = petitionersList.some(
+      (item) => item.rollNo.trim().toLowerCase() === normalizedRollNo,
+    );
+
+    if (alreadyExists) {
+      toast.error("This Roll Number is already present in the roster.");
+      return;
     }
 
-    setPetitionersList((prev) => [...prev, { ...newPetitioner }]);
+    setPetitionersList((prev) => [
+      ...prev,
+      {
+        ...newPetitioner,
+        rollNo: newPetitioner.rollNo.trim(),
+        name: newPetitioner.name.trim(),
+        fatherName: (newPetitioner.fatherName ?? "").trim(),
+        role: "Co-Petitioner",
+      },
+    ]);
+
     setNewPetitioner({
       rollNo: "",
       registrationNo: "",
@@ -467,7 +640,8 @@ export default function CaseIntakeWizardPage() {
       district: "Lucknow",
       meritScore: 0,
     });
-    toast.success("Petitioner candidate added to docket roster.");
+
+    toast.success("Co-petitioner added to roster.");
   };
 
   const handleRemovePetitioner = (index: number) => {
@@ -476,80 +650,194 @@ export default function CaseIntakeWizardPage() {
 
   const onRegisterSubmit = async (values: CaseIntakeFormValues) => {
     setIsSubmitting(true);
+
     try {
+      // Validate State and District
+      if (!values.state?.trim() || !values.district?.trim()) {
+        toast.error("Please select a valid State and District.");
+        return;
+      }
+
+      const selectedState = (dropdowns?.states || []).find(
+        (item: any) => item.stateName === values.state,
+      );
+
+      const selectedDistrict = (dropdowns?.districts || []).find(
+        (item: any) =>
+          item.districtName === values.district &&
+          (!selectedState?._id ||
+            getObjectId(item.stateId) === String(selectedState._id)),
+      );
+
+      if (!selectedState || !selectedDistrict) {
+        toast.error("Selected State or District is invalid.");
+        return;
+      }
+
+      // Validate Court and Case Type
+      if (!values.courtId || !values.caseTypeId) {
+        toast.error("Valid Court and Case Type selection is required.");
+        return;
+      }
+
+      // Validate Category, Subcategory and Subject
+      if (!values.categoryId || !values.subCategoryId || !values.subjectId) {
+        toast.error("Please select a valid Category, Subcategory and Subject.");
+        return;
+      }
+
+      // Validate OIC and Pairokar
+      if (!values.assignedOIC || !values.assignedPairokar) {
+        toast.error("Please select both OIC and Court Pairokar.");
+        return;
+      }
+
+      const selectedOIC = staffUsers.some(
+        (user: any) => String(user._id) === values.assignedOIC,
+      );
+
+      const selectedPairokar = staffUsers.some(
+        (user: any) => String(user._id) === values.assignedPairokar,
+      );
+
+      if (!selectedOIC || !selectedPairokar) {
+        toast.error(
+          "Selected OIC or Pairokar is not a valid active staff member.",
+        );
+        return;
+      }
+
+      // Validate Lead Petitioner
+      if (
+        !values.leadPetitioner?.trim() ||
+        !values.leadPetitionerRollNo?.trim()
+      ) {
+        toast.error("Lead Petitioner name and roll number are required.");
+        return;
+      }
+
+      // Prepare API Payload
       const payload = {
         mode: values.mode,
-        noticeNumber: values.noticeNumber
-          ? `${values.noticeNumber}/${values.noticeYear}`
-          : undefined,
-        writNumber: values.caseNumber
-          ? `${values.caseType} / ${values.caseNumber} / ${values.caseYear}`
-          : undefined,
-        cnrNumber: values.cnrNumber ? values.cnrNumber.trim().toUpperCase() : undefined,
 
+        noticeNumber: (values.noticeNumber ?? "").trim(),
+        writNumber: (values.caseNumber ?? "").trim(),
+        cnrNumber: (values.cnrNumber ?? "").trim(),
+
+        // Court
         court: values.court,
         courtId: values.courtId,
         courtCode: values.courtCode,
+
+        // Case Type
         caseType: values.caseType,
         caseTypeId: values.caseTypeId,
-        caseNumber: values.caseNumber,
-        caseYear: values.caseYear,
-        benchLocation: values.benchLocation,
-        courtRoomNo: values.courtRoomNo || "--",
-        coramBench: values.coramBench || "--",
+        caseNumber: values.caseNumber?.trim() || "",
+        caseYear: Number(values.caseYear),
 
+        benchLocation: values.benchLocation,
+        courtRoomNo: values.courtRoomNo?.trim() || "--",
+        coramBench: values.coramBench?.trim() || "--",
+
+        // Lead Petitioner
         leadPetitioner: values.leadPetitioner.trim(),
-        leadPetitionerRollNo: values.leadPetitionerRollNo,
-        leadPetitionerFatherName: values.leadPetitionerFatherName,
-        district: values.district,
-        state: values.state,
+        leadPetitionerRollNo: values.leadPetitionerRollNo.trim(),
+        leadPetitionerFatherName:
+          values.leadPetitionerFatherName?.trim() || "--",
+
+        // State and District
+        state: values.state.trim(),
+        district: values.district.trim(),
+
+        // Respondent
         respondentString: values.respondentString.trim(),
         petitionerAdvocate: values.petitionerAdvocate?.trim() || "--",
-        stateCounsel: values.stateCounsel || "Chief Standing Counsel (CSC)",
+        stateCounsel:
+          values.stateCounsel?.trim() || "Chief Standing Counsel (CSC)",
 
-        sectionWing: values.sectionWing,
+        // Staff and Wing
         assignedOIC: values.assignedOIC,
         assignedPairokar: values.assignedPairokar,
+        sectionWing: values.sectionWing,
 
+        // Category
         category: values.category,
         categoryId: values.categoryId,
-        subCategory: values.subCategory || "--",
-        subCategoryId: values.subCategoryId,
-        disputeSubject: values.disputeSubject || "General Service Matter",
-        subjectId: values.subjectId,
-        examCycle: values.examCycle,
 
-        hasActiveStay: values.hasActiveStay,
-        stayScope: values.stayScope,
-        isContemptNotice: values.isContemptNotice,
-        ndoh: values.ndoh ? new Date(values.ndoh).toISOString() : null,
-        remarks: values.remarks,
-        petitioners:
-          petitionersList.length > 0
-            ? petitionersList
-            : [
-                {
-                  rollNo: values.leadPetitionerRollNo || `ROLL-${Date.now().toString().slice(-6)}`,
-                  name: values.leadPetitioner,
-                  role: "Lead Petitioner" as const,
-                  district: values.district || "Lucknow",
-                  state: "Uttar Pradesh",
-                  meritScore: 0,
-                },
-              ],
+        subCategory: values.subCategory,
+        subCategoryId: values.subCategoryId,
+
+        disputeSubject: values.disputeSubject,
+        subjectId: values.subjectId,
+
+        // Additional Details
+        examCycle: values.examCycle?.trim() || "",
+        hasActiveStay: Boolean(values.hasActiveStay),
+        stayScope: values.stayScope?.trim() || "",
+        isContemptNotice: Boolean(values.isContemptNotice),
+
+        ndoh: values.ndoh
+          ? new Date(`${values.ndoh}T00:00:00`).toISOString()
+          : null,
+
+        remarks: values.remarks?.trim() || "",
+
+        // Co-Petitioners
+        petitioners: petitionersList.map((item) => {
+          const petitionerState = (dropdowns?.states || []).find(
+            (state: any) => state.stateName === item.state,
+          );
+
+          const petitionerDistrict = (dropdowns?.districts || []).find(
+            (district: any) =>
+              district.districtName === item.district &&
+              (!petitionerState?._id ||
+                getObjectId(district.stateId) === String(petitionerState._id)),
+          );
+
+          if (!petitionerState || !petitionerDistrict) {
+            throw new Error(
+              `Invalid State or District for petitioner: ${item.name}`,
+            );
+          }
+
+          return {
+            role: "Co-Petitioner" as const,
+            rollNo: item.rollNo.trim(),
+            registrationNo: item.registrationNo?.trim() || "",
+            name: item.name.trim(),
+            fatherName: item.fatherName?.trim() || "--",
+            state: item.state.trim(),
+            district: item.district.trim(),
+            categoryClaimed: item.categoryClaimed || "General",
+            postClaimed: item.postClaimed || "Constable Civil Police",
+          };
+        }),
       };
 
+      // Submit Case
       const res = await CasesAPI.createCaseIntake(payload);
 
-      if (res?.success) {
-        toast.success(
-          `Case Dossier ${res.case?.fileNo} successfully registered in registry!`,
-          { icon: "📁", duration: 5000 }
-        );
-        router.push("/admin/cases");
+      if (!res?.success) {
+        toast.error(res?.message || "Case registration failed.");
+        return;
       }
+
+      toast.success(
+        `Case Dossier ${res.case?.fileNo || ""} successfully registered!`,
+        {
+          icon: "📁",
+          duration: 5000,
+        },
+      );
+
+      router.push("/admin/cases");
     } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message || "Failed to register case intake docket");
+      toast.error(
+        err.response?.data?.message ||
+          err.message ||
+          "Failed to register case intake docket.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -557,14 +845,14 @@ export default function CaseIntakeWizardPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
-      {/* 1. Header Bar */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-base font-bold text-slate-900">
             2.2 Case Intake Wizard (Adaptive 4-Identifier Engine)
           </h1>
           <p className="text-xs text-slate-500">
-            Intake cases via Advance Notice No., Court Case No., or 16-Digit CNR (Synchronized with 7.0 Masters)
+            Intake cases via Advance Notice No., Court Case No., or 16-Digit CNR
+            (Synchronized with 7.0 Masters)
           </p>
         </div>
         <Link href="/admin/cases">
@@ -573,26 +861,33 @@ export default function CaseIntakeWizardPage() {
             variant="bordered"
             radius="sm"
             className="border-slate-200 bg-white text-xs font-semibold"
-            startContent={<span className="material-symbols-rounded text-sm">arrow_back</span>}
+            startContent={
+              <span className="material-symbols-rounded text-sm">
+                arrow_back
+              </span>
+            }
           >
             Back to Register
           </Button>
         </Link>
       </div>
 
-      {/* 2. Stepper Indicator */}
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-3.5">
           <div className="flex items-center justify-between">
             <div
               className={`flex items-center gap-2 cursor-pointer ${
-                activeStep === 1 ? "text-blue-700 font-bold" : "text-slate-500 font-medium"
+                activeStep === 1
+                  ? "text-blue-700 font-bold"
+                  : "text-slate-500 font-medium"
               }`}
               onClick={() => setActiveStep(1)}
             >
               <div
                 className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
-                  activeStep === 1 ? "bg-[#0f2744] text-white" : "bg-slate-100 text-slate-700"
+                  activeStep === 1
+                    ? "bg-[#0f2744] text-white"
+                    : "bg-slate-100 text-slate-700"
                 }`}
               >
                 1
@@ -604,13 +899,19 @@ export default function CaseIntakeWizardPage() {
 
             <div
               className={`flex items-center gap-2 cursor-pointer ${
-                activeStep === 2 ? "text-blue-700 font-bold" : "text-slate-500 font-medium"
+                activeStep === 2
+                  ? "text-blue-700 font-bold"
+                  : "text-slate-500 font-medium"
               }`}
-              onClick={() => setActiveStep(2)}
+              onClick={() => {
+                if (activeStep >= 2) setActiveStep(2);
+              }}
             >
               <div
                 className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
-                  activeStep === 2 ? "bg-[#0f2744] text-white" : "bg-slate-100 text-slate-700"
+                  activeStep === 2
+                    ? "bg-[#0f2744] text-white"
+                    : "bg-slate-100 text-slate-700"
                 }`}
               >
                 2
@@ -622,13 +923,19 @@ export default function CaseIntakeWizardPage() {
 
             <div
               className={`flex items-center gap-2 cursor-pointer ${
-                activeStep === 3 ? "text-blue-700 font-bold" : "text-slate-500 font-medium"
+                activeStep === 3
+                  ? "text-blue-700 font-bold"
+                  : "text-slate-500 font-medium"
               }`}
-              onClick={() => setActiveStep(3)}
+              onClick={() => {
+                if (activeStep >= 3) setActiveStep(3);
+              }}
             >
               <div
                 className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
-                  activeStep === 3 ? "bg-[#0f2744] text-white" : "bg-slate-100 text-slate-700"
+                  activeStep === 3
+                    ? "bg-[#0f2744] text-white"
+                    : "bg-slate-100 text-slate-700"
                 }`}
               >
                 3
@@ -638,8 +945,6 @@ export default function CaseIntakeWizardPage() {
           </div>
         </CardBody>
       </Card>
-
-      {/* STEP 1: 4-IDENTIFIER DISCOVERY & RESOLUTION */}
       {activeStep === 1 && (
         <Card shadow="none" className="border border-slate-200/80 bg-white">
           <CardBody className="p-6 space-y-6">
@@ -652,7 +957,12 @@ export default function CaseIntakeWizardPage() {
                   <span className="font-mono text-sm font-extrabold text-[#0f2744]">
                     {provisionalFileNo}
                   </span>
-                  <Chip size="sm" variant="flat" color="primary" className="text-[10px] font-bold">
+                  <Chip
+                    size="sm"
+                    variant="flat"
+                    color="primary"
+                    className="text-[10px] font-bold"
+                  >
                     Auto-Provisioned on Commit
                   </Chip>
                 </div>
@@ -668,10 +978,16 @@ export default function CaseIntakeWizardPage() {
                     onValueChange={field.onChange}
                     classNames={{ wrapper: "gap-4" }}
                   >
-                    <Radio value="NEW" classNames={{ label: "text-xs font-semibold" }}>
+                    <Radio
+                      value="NEW"
+                      classNames={{ label: "text-xs font-semibold" }}
+                    >
                       Fresh Ingestion
                     </Radio>
-                    <Radio value="OLD" classNames={{ label: "text-xs font-semibold" }}>
+                    <Radio
+                      value="OLD"
+                      classNames={{ label: "text-xs font-semibold" }}
+                    >
                       Backlog / Legacy
                     </Radio>
                   </RadioGroup>
@@ -706,7 +1022,9 @@ export default function CaseIntakeWizardPage() {
                       selectedKeys={field.value ? [field.value] : []}
                       onChange={(e) => field.onChange(e.target.value)}
                     >
-                      {(y: KeyLabelOption) => <SelectItem key={y.key}>{y.label}</SelectItem>}
+                      {(y: KeyLabelOption) => (
+                        <SelectItem key={y.key}>{y.label}</SelectItem>
+                      )}
                     </Select>
                   )}
                 />
@@ -735,7 +1053,9 @@ export default function CaseIntakeWizardPage() {
                       key="NOTICE"
                       title={
                         <div className="flex items-center gap-1.5">
-                          <span className="material-symbols-rounded text-sm">mark_email_unread</span>
+                          <span className="material-symbols-rounded text-sm">
+                            mark_email_unread
+                          </span>
                           <span>Mode 1: Advance Notice / Diary No.</span>
                         </div>
                       }
@@ -744,7 +1064,9 @@ export default function CaseIntakeWizardPage() {
                       key="WRIT"
                       title={
                         <div className="flex items-center gap-1.5">
-                          <span className="material-symbols-rounded text-sm">gavel</span>
+                          <span className="material-symbols-rounded text-sm">
+                            gavel
+                          </span>
                           <span>Mode 2: Court Writ No. (Type/No/Year)</span>
                         </div>
                       }
@@ -753,7 +1075,9 @@ export default function CaseIntakeWizardPage() {
                       key="CNR"
                       title={
                         <div className="flex items-center gap-1.5">
-                          <span className="material-symbols-rounded text-sm">qr_code_2</span>
+                          <span className="material-symbols-rounded text-sm">
+                            qr_code_2
+                          </span>
                           <span>Mode 3: 16-Digit CNR Number</span>
                         </div>
                       }
@@ -766,7 +1090,9 @@ export default function CaseIntakeWizardPage() {
             {/* Mode 1: Advance Notice */}
             {watchMode === "NOTICE" && (
               <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 space-y-3">
-                <p className="text-xs font-bold text-amber-950">Pre-Registration Advance Notice Mode</p>
+                <p className="text-xs font-bold text-amber-950">
+                  Pre-Registration Advance Notice Mode
+                </p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                   <Controller
                     name="noticeNumber"
@@ -797,7 +1123,9 @@ export default function CaseIntakeWizardPage() {
                         onChange={(e) => field.onChange(e.target.value)}
                         className="bg-white"
                       >
-                        {(y: KeyLabelOption) => <SelectItem key={y.key}>{y.label}</SelectItem>}
+                        {(y: KeyLabelOption) => (
+                          <SelectItem key={y.key}>{y.label}</SelectItem>
+                        )}
                       </Select>
                     )}
                   />
@@ -833,7 +1161,9 @@ export default function CaseIntakeWizardPage() {
             {/* Mode 2: Court Writ */}
             {watchMode === "WRIT" && (
               <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 space-y-3">
-                <p className="text-xs font-bold text-blue-950">Formal Court Case Number Mode</p>
+                <p className="text-xs font-bold text-blue-950">
+                  Formal Court Case Number Mode
+                </p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                   <Controller
                     name="caseType"
@@ -844,11 +1174,29 @@ export default function CaseIntakeWizardPage() {
                         label="Case Type *"
                         labelPlacement="outside"
                         items={caseTypeOptions}
-                        selectedKeys={[field.value]}
-                        onChange={(e) => field.onChange(e.target.value)}
+                        selectedKeys={field.value ? [field.value] : []}
+                        onChange={(e) => {
+                          const selected = caseTypeOptions.find(
+                            (item) => item.key === e.target.value,
+                          );
+
+                          if (!selected?.id) {
+                            toast.error("Please select a valid case type.");
+                            return;
+                          }
+
+                          field.onChange(selected.key);
+                          setValue("caseTypeId", selected.id);
+                        }}
+                        isDisabled={
+                          !selectedCourtId || caseTypeOptions.length === 0
+                        }
+                        isRequired
                         className="bg-white"
                       >
-                        {(item: CaseTypeOption) => <SelectItem key={item.key}>{item.label}</SelectItem>}
+                        {(item: CaseTypeOption) => (
+                          <SelectItem key={item.key}>{item.label}</SelectItem>
+                        )}
                       </Select>
                     )}
                   />
@@ -878,10 +1226,16 @@ export default function CaseIntakeWizardPage() {
                         labelPlacement="outside"
                         items={YEAR_OPTIONS}
                         selectedKeys={[field.value.toString()]}
-                        onChange={(e) => field.onChange(parseInt(e.target.value, 10) || CURRENT_YEAR)}
+                        onChange={(e) =>
+                          field.onChange(
+                            parseInt(e.target.value, 10) || CURRENT_YEAR,
+                          )
+                        }
                         className="bg-white"
                       >
-                        {(y: KeyLabelOption) => <SelectItem key={y.key}>{y.label}</SelectItem>}
+                        {(y: KeyLabelOption) => (
+                          <SelectItem key={y.key}>{y.label}</SelectItem>
+                        )}
                       </Select>
                     )}
                   />
@@ -903,7 +1257,9 @@ export default function CaseIntakeWizardPage() {
             {/* Mode 3: 16-Digit CNR */}
             {watchMode === "CNR" && (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
-                <p className="text-xs font-bold text-emerald-950">16-Digit National CNR Mode</p>
+                <p className="text-xs font-bold text-emerald-950">
+                  16-Digit National CNR Mode
+                </p>
                 <div className="flex gap-2">
                   <Controller
                     name="cnrNumber"
@@ -943,19 +1299,51 @@ export default function CaseIntakeWizardPage() {
                     label="Court Establishment *"
                     labelPlacement="outside"
                     items={courtOptions}
-                    selectedKeys={[field.value]}
+                    selectedKeys={field.value ? [field.value] : []}
                     onChange={(e) => {
-                      const sel = courtOptions.find((c: CourtOption) => c.key === e.target.value);
-                      field.onChange(e.target.value);
-                      if (sel) {
-                        setValue("courtCode", sel.code);
-                        if (sel.id) setValue("courtId", sel.id);
-                        setValue("benchLocation", sel.bench);
+                      const selected = courtOptions.find(
+                        (court) => court.key === e.target.value,
+                      );
+
+                      if (!selected?.id) {
+                        toast.error("Please select a valid court.");
+                        return;
+                      }
+
+                      field.onChange(selected.key);
+
+                      setValue("courtId", selected.id);
+                      setValue("courtCode", selected.code);
+                      setValue("benchLocation", selected.bench);
+
+                      // Reset old case type reference when court changes.
+                      setValue("caseType", "");
+                      setValue("caseTypeId", "");
+
+                      const matchingCaseType = (
+                        dropdowns?.caseTypes || []
+                      ).find(
+                        (item: any) =>
+                          item?._id &&
+                          getObjectId(item.courtId) === selected.id,
+                      );
+
+                      if (matchingCaseType) {
+                        setValue(
+                          "caseType",
+                          matchingCaseType.shortName ||
+                            matchingCaseType.caseTypeName,
+                        );
+                        setValue("caseTypeId", String(matchingCaseType._id));
                       }
                     }}
                     isRequired
+                    isLoading={loadingDropdowns}
+                    isDisabled={loadingDropdowns || courtOptions.length === 0}
                   >
-                    {(court: CourtOption) => <SelectItem key={court.key}>{court.label}</SelectItem>}
+                    {(court: CourtOption) => (
+                      <SelectItem key={court.key}>{court.label}</SelectItem>
+                    )}
                   </Select>
                 )}
               />
@@ -1052,9 +1440,12 @@ export default function CaseIntakeWizardPage() {
                     <Input
                       {...field}
                       size="sm"
-                      label="Roll No. / PNO"
+                      label="Roll No. / PNO *"
                       labelPlacement="outside"
                       placeholder="e.g. 2401892"
+                      isRequired
+                      isInvalid={!!errors.leadPetitionerRollNo}
+                      errorMessage={errors.leadPetitionerRollNo?.message}
                     />
                   )}
                 />
@@ -1102,7 +1493,12 @@ export default function CaseIntakeWizardPage() {
                     Add individual applicants with Roll No, Name and District
                   </p>
                 </div>
-                <Chip size="sm" variant="flat" color="primary" className="text-[10px] font-bold">
+                <Chip
+                  size="sm"
+                  variant="flat"
+                  color="primary"
+                  className="text-[10px] font-bold"
+                >
                   {petitionersList.length} Candidates Added
                 </Chip>
               </div>
@@ -1113,7 +1509,9 @@ export default function CaseIntakeWizardPage() {
                   label="Roll No."
                   placeholder="e.g. 2401892"
                   value={newPetitioner.rollNo}
-                  onValueChange={(val) => setNewPetitioner({ ...newPetitioner, rollNo: val })}
+                  onValueChange={(val) =>
+                    setNewPetitioner({ ...newPetitioner, rollNo: val })
+                  }
                   className="bg-white"
                 />
                 <Input
@@ -1121,7 +1519,9 @@ export default function CaseIntakeWizardPage() {
                   label="Registration No."
                   placeholder="e.g. REG-9182"
                   value={newPetitioner.registrationNo}
-                  onValueChange={(val) => setNewPetitioner({ ...newPetitioner, registrationNo: val })}
+                  onValueChange={(val) =>
+                    setNewPetitioner({ ...newPetitioner, registrationNo: val })
+                  }
                   className="bg-white"
                 />
                 <Input
@@ -1129,7 +1529,9 @@ export default function CaseIntakeWizardPage() {
                   label="Candidate Name"
                   placeholder="Candidate Name"
                   value={newPetitioner.name}
-                  onValueChange={(val) => setNewPetitioner({ ...newPetitioner, name: val })}
+                  onValueChange={(val) =>
+                    setNewPetitioner({ ...newPetitioner, name: val })
+                  }
                   className="bg-white"
                 />
                 <Input
@@ -1137,7 +1539,9 @@ export default function CaseIntakeWizardPage() {
                   label="Father Name"
                   placeholder="Father Name"
                   value={newPetitioner.fatherName}
-                  onValueChange={(val) => setNewPetitioner({ ...newPetitioner, fatherName: val })}
+                  onValueChange={(val) =>
+                    setNewPetitioner({ ...newPetitioner, fatherName: val })
+                  }
                   className="bg-white"
                 />
                 <Select
@@ -1145,10 +1549,17 @@ export default function CaseIntakeWizardPage() {
                   label="District"
                   items={districtOptions}
                   selectedKeys={[newPetitioner.district]}
-                  onChange={(e) => setNewPetitioner({ ...newPetitioner, district: e.target.value })}
+                  onChange={(e) =>
+                    setNewPetitioner({
+                      ...newPetitioner,
+                      district: e.target.value,
+                    })
+                  }
                   className="bg-white"
                 >
-                  {(dist: KeyLabelOption) => <SelectItem key={dist.key}>{dist.label}</SelectItem>}
+                  {(dist: KeyLabelOption) => (
+                    <SelectItem key={dist.key}>{dist.label}</SelectItem>
+                  )}
                 </Select>
               </div>
 
@@ -1157,7 +1568,11 @@ export default function CaseIntakeWizardPage() {
                   size="sm"
                   radius="sm"
                   className="bg-[#0f2744] text-xs font-semibold text-white hover:bg-[#163a66]"
-                  startContent={<span className="material-symbols-rounded text-sm">person_add</span>}
+                  startContent={
+                    <span className="material-symbols-rounded text-sm">
+                      person_add
+                    </span>
+                  }
                   onClick={handleAddPetitioner}
                 >
                   Add Petitioner to Roster
@@ -1166,7 +1581,11 @@ export default function CaseIntakeWizardPage() {
 
               {petitionersList.length > 0 && (
                 <div className="mt-3 overflow-hidden rounded-lg border border-slate-200 bg-white">
-                  <Table removeWrapper aria-label="Added Petitioners Table" className="min-w-full">
+                  <Table
+                    removeWrapper
+                    aria-label="Added Petitioners Table"
+                    className="min-w-full"
+                  >
                     <TableHeader>
                       <TableColumn className="bg-transparent text-[10px] font-bold uppercase text-slate-400">
                         ROLL NO
@@ -1188,7 +1607,10 @@ export default function CaseIntakeWizardPage() {
                       {(p) => {
                         const idx = petitionersList.indexOf(p);
                         return (
-                          <TableRow key={idx} className="border-b border-slate-100">
+                          <TableRow
+                            key={idx}
+                            className="border-b border-slate-100"
+                          >
                             <TableCell className="font-mono text-xs font-bold text-blue-700">
                               {p.rollNo}
                             </TableCell>
@@ -1209,7 +1631,9 @@ export default function CaseIntakeWizardPage() {
                                 className="text-slate-400 hover:text-rose-600"
                                 onClick={() => handleRemovePetitioner(idx)}
                               >
-                                <span className="material-symbols-rounded text-sm">delete</span>
+                                <span className="material-symbols-rounded text-sm">
+                                  delete
+                                </span>
                               </Button>
                             </TableCell>
                           </TableRow>
@@ -1249,7 +1673,8 @@ export default function CaseIntakeWizardPage() {
 
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Internal Department Routing &amp; Taxonomy (7.6 &amp; 8.1 Masters)
+                Internal Department Routing &amp; Taxonomy (7.6 &amp; 8.1
+                Masters)
               </h3>
               <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <Controller
@@ -1265,7 +1690,9 @@ export default function CaseIntakeWizardPage() {
                       onChange={(e) => field.onChange(e.target.value)}
                       isRequired
                     >
-                      {(wing: WingOption) => <SelectItem key={wing.key}>{wing.label}</SelectItem>}
+                      {(wing: WingOption) => (
+                        <SelectItem key={wing.key}>{wing.label}</SelectItem>
+                      )}
                     </Select>
                   )}
                 />
@@ -1285,7 +1712,9 @@ export default function CaseIntakeWizardPage() {
                       isRequired
                       isLoading={loadingDropdowns}
                     >
-                      {(oic: KeyLabelOption) => <SelectItem key={oic.key}>{oic.label}</SelectItem>}
+                      {(oic: KeyLabelOption) => (
+                        <SelectItem key={oic.key}>{oic.label}</SelectItem>
+                      )}
                     </Select>
                   )}
                 />
@@ -1305,7 +1734,9 @@ export default function CaseIntakeWizardPage() {
                       isRequired
                       isLoading={loadingDropdowns}
                     >
-                      {(p: KeyLabelOption) => <SelectItem key={p.key}>{p.label}</SelectItem>}
+                      {(p: KeyLabelOption) => (
+                        <SelectItem key={p.key}>{p.label}</SelectItem>
+                      )}
                     </Select>
                   )}
                 />
@@ -1321,18 +1752,39 @@ export default function CaseIntakeWizardPage() {
                       label="Dispute Category (Tier-1) *"
                       labelPlacement="outside"
                       items={categoryOptions}
-                      selectedKeys={[field.value]}
+                      selectedKeys={field.value ? [field.value] : []}
                       onChange={(e) => {
-                        const sel = categoryOptions.find((catItem: CategoryOption) => catItem.key === e.target.value);
-                        field.onChange(e.target.value);
-                        if (sel && sel.id) {
-                          setValue("categoryId", sel.id);
-                          fetchSubCategories(sel.id);
+                        const selected = categoryOptions.find(
+                          (item) => item.key === e.target.value,
+                        );
+
+                        if (!selected?.id) {
+                          toast.error("Please select a valid category.");
+                          return;
                         }
+
+                        field.onChange(selected.key);
+                        setValue("categoryId", selected.id);
+
+                        // Clear dependent selections before loading new options.
+                        setValue("subCategory", "");
+                        setValue("subCategoryId", "");
+                        setValue("disputeSubject", "");
+                        setValue("subjectId", "");
+
+                        setSubCategoryOptions([]);
+                        setSubjectOptions([]);
+
+                        fetchSubCategories(selected.id);
                       }}
                       isRequired
+                      isDisabled={
+                        loadingDropdowns || categoryOptions.length === 0
+                      }
                     >
-                      {(cat: CategoryOption) => <SelectItem key={cat.key}>{cat.label}</SelectItem>}
+                      {(cat: CategoryOption) => (
+                        <SelectItem key={cat.key}>{cat.label}</SelectItem>
+                      )}
                     </Select>
                   )}
                 />
@@ -1348,19 +1800,37 @@ export default function CaseIntakeWizardPage() {
                       items={subCategoryOptions}
                       selectedKeys={field.value ? [field.value] : []}
                       onChange={(e) => {
-                        const sel = subCategoryOptions.find((scItem: SubCategoryOption) => scItem.key === e.target.value);
-                        field.onChange(e.target.value);
-                        if (sel && sel.id) {
-                          setValue("subCategoryId", sel.id);
-                          if (sel.officer && sel.officer !== "--") {
-                            setValue("assignedOIC", sel.officer);
-                          }
-                          fetchSubjects(sel.id);
+                        const selected = subCategoryOptions.find(
+                          (item) => item.key === e.target.value,
+                        );
+
+                        if (!selected?.id) {
+                          toast.error("Please select a valid subcategory.");
+                          return;
                         }
+
+                        field.onChange(selected.key);
+                        setValue("subCategoryId", selected.id);
+
+                        // Use the actual User ObjectId from defaultOfficerId.
+                        if (selected.officerId) {
+                          setValue("assignedOIC", selected.officerId);
+                        }
+
+                        setValue("disputeSubject", "");
+                        setValue("subjectId", "");
+                        setSubjectOptions([]);
+
+                        fetchSubjects(selected.id);
                       }}
                       isRequired
+                      isDisabled={
+                        !watch("categoryId") || subCategoryOptions.length === 0
+                      }
                     >
-                      {(sc: SubCategoryOption) => <SelectItem key={sc.key}>{sc.label}</SelectItem>}
+                      {(item: SubCategoryOption) => (
+                        <SelectItem key={item.key}>{item.label}</SelectItem>
+                      )}
                     </Select>
                   )}
                 />
@@ -1376,13 +1846,26 @@ export default function CaseIntakeWizardPage() {
                       items={subjectOptions}
                       selectedKeys={field.value ? [field.value] : []}
                       onChange={(e) => {
-                        const sel = subjectOptions.find((sItem: SubjectOption) => sItem.key === e.target.value);
-                        field.onChange(e.target.value);
-                        if (sel && sel.id) setValue("subjectId", sel.id);
+                        const selected = subjectOptions.find(
+                          (item) => item.key === e.target.value,
+                        );
+
+                        if (!selected?.id) {
+                          toast.error("Please select a valid subject.");
+                          return;
+                        }
+
+                        field.onChange(selected.key);
+                        setValue("subjectId", selected.id);
                       }}
                       isRequired
+                      isDisabled={
+                        !watch("subCategoryId") || subjectOptions.length === 0
+                      }
                     >
-                      {(sub: SubjectOption) => <SelectItem key={sub.key}>{sub.label}</SelectItem>}
+                      {(item: SubjectOption) => (
+                        <SelectItem key={item.key}>{item.label}</SelectItem>
+                      )}
                     </Select>
                   )}
                 />
@@ -1396,7 +1879,11 @@ export default function CaseIntakeWizardPage() {
                 name="hasActiveStay"
                 control={control}
                 render={({ field }) => (
-                  <Switch size="sm" isSelected={field.value} onValueChange={field.onChange}>
+                  <Switch
+                    size="sm"
+                    isSelected={field.value}
+                    onValueChange={field.onChange}
+                  >
                     <span className="text-xs font-semibold text-rose-600">
                       Interim Stay Motion in Effect
                     </span>
@@ -1408,7 +1895,11 @@ export default function CaseIntakeWizardPage() {
                 name="isContemptNotice"
                 control={control}
                 render={({ field }) => (
-                  <Switch size="sm" isSelected={field.value} onValueChange={field.onChange}>
+                  <Switch
+                    size="sm"
+                    isSelected={field.value}
+                    onValueChange={field.onChange}
+                  >
                     <span className="text-xs font-semibold text-amber-600">
                       Contempt Imminent Warning (&lt;3 Days)
                     </span>
@@ -1434,16 +1925,25 @@ export default function CaseIntakeWizardPage() {
             </div>
 
             <div className="flex justify-between border-t border-slate-100 pt-4">
-              <Button size="sm" radius="sm" variant="bordered" onClick={() => setActiveStep(1)}>
+              <Button
+                size="sm"
+                radius="sm"
+                variant="bordered"
+                onClick={() => setActiveStep(1)}
+              >
                 ← Previous
               </Button>
               <Button
                 size="sm"
                 radius="sm"
                 className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
-                onClick={() => setActiveStep(3)}
+                isLoading={isSubmitting}
+                isDisabled={isSubmitting}
+                onClick={handleSubmit(onRegisterSubmit)}
               >
-                Next: Document Attachment &amp; Commit →
+                {isSubmitting
+                  ? "Registering Case..."
+                  : "Submit & Register Case →"}
               </Button>
             </div>
           </CardBody>
@@ -1456,22 +1956,34 @@ export default function CaseIntakeWizardPage() {
           <CardBody className="p-6 space-y-6">
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Initial Document Attachment (MinIO / Cloudinary Folder 01_Petitions)
+                Initial Document Attachment (MinIO / Cloudinary Folder
+                01_Petitions)
               </h3>
               <p className="mt-1 text-[11px] text-slate-500">
-                Upload scanned advocate notice or petition copy. System generates cryptographic SHA-256 seal automatically.
+                Upload scanned advocate notice or petition copy. System
+                generates cryptographic SHA-256 seal automatically.
               </p>
             </div>
 
             <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 p-8 text-center hover:bg-slate-50/50">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-700">
-                <span className="material-symbols-rounded text-2xl">cloud_upload</span>
+                <span className="material-symbols-rounded text-2xl">
+                  cloud_upload
+                </span>
               </div>
-              <p className="mt-3 text-xs font-bold text-slate-900">Notice / Petition PDF Attachment</p>
-              <p className="text-[10px] text-slate-400">
-                PDF documents will be automatically organized under 01_Petitions in 3.0 DMS
+              <p className="mt-3 text-xs font-bold text-slate-900">
+                Notice / Petition PDF Attachment
               </p>
-              <Button size="sm" radius="sm" variant="bordered" className="mt-3 text-xs font-semibold">
+              <p className="text-[10px] text-slate-400">
+                PDF documents will be automatically organized under 01_Petitions
+                in 3.0 DMS
+              </p>
+              <Button
+                size="sm"
+                radius="sm"
+                variant="bordered"
+                className="mt-3 text-xs font-semibold"
+              >
                 Browse File (Optional at Intake)
               </Button>
             </div>
@@ -1493,43 +2005,107 @@ export default function CaseIntakeWizardPage() {
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs space-y-2">
-              <p className="font-extrabold text-slate-900">4-Identifier Hierarchy Verification:</p>
+              <p className="font-extrabold text-slate-900">
+                4-Identifier Hierarchy Verification:
+              </p>
               <div className="grid grid-cols-2 gap-3 text-slate-700 sm:grid-cols-4">
                 <div>
-                  <span className="text-[10px] font-bold text-slate-400">1. FILE DOCKET NO</span>
-                  <p className="font-mono font-bold text-[#0f2744]">{provisionalFileNo}</p>
+                  <span className="text-[10px] font-bold text-slate-400">
+                    1. FILE DOCKET NO
+                  </span>
+                  <p className="font-mono font-bold text-[#0f2744]">
+                    {provisionalFileNo}
+                  </p>
                 </div>
                 <div>
-                  <span className="text-[10px] font-bold text-slate-400">2. ADVOCATE NOTICE NO</span>
+                  <span className="text-[10px] font-bold text-slate-400">
+                    2. ADVOCATE NOTICE NO
+                  </span>
                   <p className="font-mono font-bold text-amber-700">
-                    {watchNoticeNumber ? `${watchNoticeNumber}/${watchNoticeYear}` : "--"}
+                    {watchNoticeNumber
+                      ? `${watchNoticeNumber}/${watchNoticeYear}`
+                      : "--"}
                   </p>
                 </div>
                 <div>
-                  <span className="text-[10px] font-bold text-slate-400">3. COURT WRIT NO</span>
+                  <span className="text-[10px] font-bold text-slate-400">
+                    3. COURT WRIT NO
+                  </span>
                   <p className="font-bold text-blue-700">
-                    {watchCaseNumber ? `${watchCaseType} / ${watchCaseNumber} / ${watchCaseYear}` : "--"}
+                    {watchCaseNumber
+                      ? `${watchCaseType} / ${watchCaseNumber} / ${watchCaseYear}`
+                      : "--"}
                   </p>
                 </div>
                 <div>
-                  <span className="text-[10px] font-bold text-slate-400">4. CNR NUMBER</span>
-                  <p className="font-mono text-slate-600">{watchCnrNumber || "Pending Allotment"}</p>
+                  <span className="text-[10px] font-bold text-slate-400">
+                    4. CNR NUMBER
+                  </span>
+                  <p className="font-mono text-slate-600">
+                    {watchCnrNumber || "Pending Allotment"}
+                  </p>
                 </div>
               </div>
             </div>
 
             <div className="flex justify-between border-t border-slate-100 pt-4">
-              <Button size="sm" radius="sm" variant="bordered" onClick={() => setActiveStep(2)}>
-                ← Previous
-              </Button>
               <Button
                 size="sm"
                 radius="sm"
-                isLoading={isSubmitting}
-                className="bg-emerald-600 font-semibold text-white shadow-sm hover:bg-emerald-700"
-                onClick={handleSubmit(onRegisterSubmit)}
+                variant="bordered"
+                onClick={() => setActiveStep(1)}
               >
-                Confirm &amp; Create Institutional Docket
+                ← Previous
+              </Button>
+
+              <Button
+                size="sm"
+                radius="sm"
+                className="bg-[#0f2744] font-semibold text-white hover:bg-[#163a66]"
+                onClick={async () => {
+                  const isValid = await trigger([
+                    "leadPetitioner",
+                    "leadPetitionerRollNo",
+                    "respondentString",
+                    "sectionWing",
+                    "assignedOIC",
+                    "assignedPairokar",
+                    "category",
+                    "categoryId",
+                    "subCategory",
+                    "subCategoryId",
+                    "disputeSubject",
+                    "subjectId",
+                  ]);
+
+                  if (!isValid) {
+                    toast.error(
+                      "Please complete all mandatory fields in Step 2.",
+                    );
+                    return;
+                  }
+
+                  if (
+                    !watch("leadPetitioner")?.trim() ||
+                    !watch("leadPetitionerRollNo")?.trim() ||
+                    !watch("respondentString")?.trim() ||
+                    !watch("sectionWing")?.trim() ||
+                    !watch("categoryId") ||
+                    !watch("subCategoryId") ||
+                    !watch("subjectId") ||
+                    !watch("assignedOIC") ||
+                    !watch("assignedPairokar")
+                  ) {
+                    toast.error(
+                      "Please complete all mandatory fields and valid master/staff selections.",
+                    );
+                    return;
+                  }
+
+                  setActiveStep(3);
+                }}
+              >
+                Next: Document Attachment &amp; Commit →
               </Button>
             </div>
           </CardBody>

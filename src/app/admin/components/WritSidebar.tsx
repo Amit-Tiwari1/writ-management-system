@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Chip, Button } from "@nextui-org/react";
 import { useAppSelector, useAppDispatch } from "@/store/hooks";
-import { logoutAction, MenuItem } from "@/store/slices/authSlice";
+import { logoutThunk, MenuItem } from "@/store/slices/authSlice";
 import toast from "react-hot-toast";
 
 interface WritSidebarProps {
@@ -60,11 +60,25 @@ export default function WritSidebar({ isMobileOpen, setIsMobileOpen }: WritSideb
     }
   }, [pathname, user?.allowedMenus]);
 
-  const handleLogout = () => {
-    dispatch(logoutAction());
-    toast.success("Logged out successfully.");
+const handleLogout = async () => {
+  try {
+    const result = await dispatch(logoutThunk()).unwrap();
+
+    if (result.serverLogoutSucceeded) {
+      toast.success("Logged out successfully.");
+    } else {
+      toast.error(
+        "Signed out locally. Server session could not be revoked."
+      );
+    }
+
     router.replace("/");
-  };
+  } catch (error) {
+    console.error("Logout error:", error);
+    toast.error("Unable to complete logout.");
+    router.replace("/");
+  }
+};
 
   const userInitial = user?.name ? user.name.charAt(0).toUpperCase() : "A";
 

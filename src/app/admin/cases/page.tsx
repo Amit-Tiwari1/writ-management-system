@@ -569,15 +569,32 @@ export default function CaseRegisterPage() {
               </div>
             </div>
           );
+case "officer": {
+  const oicName =
+    typeof item.assignedOIC === "object" && item.assignedOIC !== null
+      ? item.assignedOIC.name
+      : item.assignedOIC;
 
-        case "officer":
-          return (
-            <div>
-              <p className="text-xs font-bold text-slate-800">{item.assignedOIC}</p>
-              <p className="text-[10px] text-slate-500">Pairokar: {item.assignedPairokar}</p>
-              <p className="text-[9px] text-slate-400">{item.sectionWing}</p>
-            </div>
-          );
+  const pairokarName =
+    typeof item.assignedPairokar === "object" && item.assignedPairokar !== null
+      ? item.assignedPairokar.name
+      : item.assignedPairokar;
+      return (
+    <div>
+      <p className="text-xs font-bold text-slate-800">
+        {oicName || "--"}
+      </p>
+
+      <p className="text-[10px] text-slate-500">
+        Pairokar: {pairokarName || "--"}
+      </p>
+
+      <p className="text-[9px] text-slate-400">
+        {item.sectionWing || "--"}
+      </p>
+    </div>
+  );
+}
 
         case "ndoh": {
           const ndohDate = item.ndoh
@@ -870,7 +887,6 @@ export default function CaseRegisterPage() {
             </Select>
           </div>
 
-          {/* Row 2 Filters: Dispute Subject, Assigned OIC, Wing, State, Action Buttons */}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-5">
             <Select
               size="sm"

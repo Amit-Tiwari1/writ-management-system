@@ -1,6 +1,7 @@
+
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Card,
   CardBody,
@@ -25,16 +26,28 @@ import {
   Spinner,
 } from "@nextui-org/react";
 import Link from "next/link";
+import { useDispatch, useSelector } from "react-redux";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
-
-import { MastersAPI } from "@/api/mastersApi";
-import { departmentSchema } from "@/schemas/masterSchema";
-import { IDepartmentItem } from "@/types/master.types";
 import { z } from "zod";
 
+import type { AppDispatch, RootState } from "@/store";
+import { departmentSchema } from "@/schemas/masterSchema";
+import type { IDepartmentItem } from "@/types/master.types";
+
+import {
+  fetchDepartments,
+  createDepartment,
+  updateDepartment,
+  deleteDepartment,
+} from "@/store/thunks/masterThunks/organizationThunk";
+
+import { departmentColumns } from "@/app/admin/components/columns/OrganizationColumns";
+
 type DepartmentFormValues = z.infer<typeof departmentSchema>;
+
+const ROWS_PER_PAGE = 5;
 
 const PARENT_FORMATIONS = [
   { key: "State Police Headquarter", label: "State Police Headquarter" },
@@ -49,25 +62,80 @@ const PARENT_FORMATION_FILTER_ITEMS = [
   ...PARENT_FORMATIONS,
 ];
 
-export default function OrganizationMasterPage() {
-  const { isOpen: isAddOpen, onOpen: onAddOpen, onOpenChange: onAddOpenChange } = useDisclosure();
-  const { isOpen: isEditOpen, onOpen: onEditOpen, onOpenChange: onEditOpenChange } = useDisclosure();
-  const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onOpenChange: onDeleteOpenChange } = useDisclosure();
+const getErrorMessage = (error: unknown): string => {
+  if (typeof error === "string") {
+    return error;
+  }
 
-  const [departments, setDepartments] = useState<IDepartmentItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Something went wrong. Please try again.";
+};
+
+export default function OrganizationMasterPage() {
+  const dispatch = useDispatch<AppDispatch>();
+
+  // =====================================================
+  // REDUX STATE
+  // =====================================================
+
+  const departmentList = useSelector(
+    (state: RootState) => state.organization.list,
+  );
+
+  const departments: IDepartmentItem[] = departmentList.data ?? [];
+  const totalCount = departmentList.totalCount ?? 0;
+  const pagination = departmentList.pagination;
+  const loading = departmentList.loading;
+
+  // =====================================================
+  // MODALS
+  // =====================================================
+
+  const {
+    isOpen: isAddOpen,
+    onOpen: onAddOpen,
+    onClose: onAddClose,
+    onOpenChange: onAddOpenChange,
+  } = useDisclosure();
+
+  const {
+    isOpen: isEditOpen,
+    onOpen: onEditOpen,
+    onClose: onEditClose,
+    onOpenChange: onEditOpenChange,
+  } = useDisclosure();
+
+  const {
+    isOpen: isDeleteOpen,
+    onOpen: onDeleteOpen,
+    onClose: onDeleteClose,
+    onOpenChange: onDeleteOpenChange,
+  } = useDisclosure();
+
+  // =====================================================
+  // LOCAL STATE
+  // =====================================================
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedParentFilter, setSelectedParentFilter] = useState("ALL");
 
   const [page, setPage] = useState(1);
-  const rowsPerPage = 8;
 
   const [editingDept, setEditingDept] = useState<IDepartmentItem | null>(null);
-  const [deptToDelete, setDeptToDelete] = useState<IDepartmentItem | null>(null);
 
-  // 1. Add Form
+  const [deptToDelete, setDeptToDelete] = useState<IDepartmentItem | null>(
+    null,
+  );
+
+  // =====================================================
+  // ADD FORM
+  // =====================================================
+
   const {
     control: addControl,
     handleSubmit: handleAddSubmit,
@@ -83,7 +151,10 @@ export default function OrganizationMasterPage() {
     },
   });
 
-  // 2. Edit Form
+  // =====================================================
+  // EDIT FORM
+  // =====================================================
+
   const {
     control: editControl,
     handleSubmit: handleEditSubmit,
@@ -99,26 +170,36 @@ export default function OrganizationMasterPage() {
     },
   });
 
-  const fetchDepartments = useCallback(async () => {
-    setLoading(true);
+  // =====================================================
+  // FETCH DEPARTMENTS
+  // BACKEND SEARCH + FILTER + PAGINATION
+  // =====================================================
+
+  const refreshDepartments = useCallback(async () => {
     try {
-      const res = await MastersAPI.getDepartments({
-        limit: 100,
-        parentFormation: selectedParentFilter !== "ALL" ? selectedParentFilter : undefined,
-      });
-      if (res?.success) {
-        setDepartments(res.data || []);
-      }
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to load departments list");
-    } finally {
-      setLoading(false);
+      await dispatch(
+        fetchDepartments({
+          view: "list",
+          page,
+          limit: ROWS_PER_PAGE,
+          search: searchQuery.trim(),
+          ...(selectedParentFilter !== "ALL"
+            ? { parentFormation: selectedParentFilter }
+            : {}),
+        }),
+      ).unwrap();
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error));
     }
-  }, [selectedParentFilter]);
+  }, [dispatch, page, searchQuery, selectedParentFilter]);
 
   useEffect(() => {
-    fetchDepartments();
-  }, [fetchDepartments]);
+    refreshDepartments();
+  }, [refreshDepartments]);
+
+  // =====================================================
+  // ADD DEPARTMENT
+  // =====================================================
 
   const handleOpenAdd = () => {
     resetAddForm({
@@ -127,11 +208,13 @@ export default function OrganizationMasterPage() {
       parentFormation: "State Police Headquarter",
       headquarters: "Lucknow",
     });
+
     onAddOpen();
   };
 
   const onAddDepartment = async (values: DepartmentFormValues) => {
     setIsSubmitting(true);
+
     try {
       const payload = {
         unitName: values.unitName.trim(),
@@ -140,53 +223,76 @@ export default function OrganizationMasterPage() {
         headquarters: values.headquarters?.trim() || "Lucknow",
       };
 
-      const res = await MastersAPI.createDepartment(payload);
-      if (res?.success) {
-        toast.success(`Department ${payload.unitCode} added successfully!`);
-        onAddOpenChange();
-        fetchDepartments();
-      }
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to register department");
+      await dispatch(createDepartment(payload)).unwrap();
+
+      toast.success(`Department ${payload.unitCode} added successfully!`);
+
+      onAddClose();
+      resetAddForm();
+
+      await refreshDepartments();
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // =====================================================
+  // EDIT DEPARTMENT
+  // =====================================================
+
   const handleOpenEdit = (item: IDepartmentItem) => {
     setEditingDept(item);
+
     resetEditForm({
       unitName: item.unitName,
       unitCode: item.unitCode,
       parentFormation: item.parentFormation || "State Police Headquarter",
       headquarters: item.headquarters || "Lucknow",
     });
+
     onEditOpen();
   };
 
   const onSaveEdit = async (values: DepartmentFormValues) => {
     if (!editingDept) return;
+
     setIsSubmitting(true);
+
     try {
       const payload = {
-        _id: editingDept._id,
         unitName: values.unitName.trim(),
         unitCode: values.unitCode.trim().toUpperCase(),
         parentFormation: values.parentFormation,
         headquarters: values.headquarters?.trim() || "Lucknow",
       };
 
-      await MastersAPI.createDepartment(payload);
+      await dispatch(
+        updateDepartment({
+          id: editingDept._id,
+          payload,
+        }),
+      ).unwrap();
+
       toast.success(`Updated ${payload.unitCode}`);
-      onEditOpenChange();
+
+      onEditClose();
+
       setEditingDept(null);
-      fetchDepartments();
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to update department");
+      resetEditForm();
+
+      await refreshDepartments();
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  // =====================================================
+  // DELETE DEPARTMENT
+  // =====================================================
 
   const handleOpenDelete = (item: IDepartmentItem) => {
     setDeptToDelete(item);
@@ -195,68 +301,170 @@ export default function OrganizationMasterPage() {
 
   const handleConfirmDelete = async () => {
     if (!deptToDelete) return;
+
     setIsSubmitting(true);
+
     try {
-      setDepartments((prev) => prev.filter((d) => d._id !== deptToDelete._id));
-      toast.success(`Unit ${deptToDelete.unitCode} removed.`);
-      onDeleteOpenChange();
+      await dispatch(deleteDepartment(deptToDelete._id)).unwrap();
+
+      toast.success(`Unit ${deptToDelete.unitCode} removed successfully.`);
+
+      onDeleteClose();
+
       setDeptToDelete(null);
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || "Failed to remove department");
+
+      // Move to previous page if the last record was deleted.
+      if (departments.length === 1 && page > 1) {
+        setPage((currentPage) => currentPage - 1);
+      } else {
+        await refreshDepartments();
+      }
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const filteredDepartments = useMemo(() => {
-    return departments.filter((item) => {
-      const matchesSearch =
-        item.unitName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.unitCode?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.parentFormation?.toLowerCase().includes(searchQuery.toLowerCase());
+  // =====================================================
+  // TABLE CELL RENDERING
+  // =====================================================
 
-      const matchesParent =
-        selectedParentFilter === "ALL" || item.parentFormation === selectedParentFilter;
+  const renderDepartmentCell = (
+    item: IDepartmentItem,
+    columnKey: React.Key,
+  ): React.ReactNode => {
+    switch (columnKey) {
+      case "serial":
+        return (
+          <span className="text-xs font-bold text-slate-400">
+            {(page - 1) * ROWS_PER_PAGE + departments.indexOf(item) + 1}
+          </span>
+        );
 
-      return matchesSearch && matchesParent;
-    });
-  }, [departments, searchQuery, selectedParentFilter]);
+      case "unitName":
+        return (
+          <span className="text-xs font-bold text-slate-900">
+            {item.unitName}
+          </span>
+        );
 
-  const totalPages = Math.ceil(filteredDepartments.length / rowsPerPage) || 1;
-  const paginatedDepartments = useMemo(() => {
-    const start = (page - 1) * rowsPerPage;
-    return filteredDepartments.slice(start, start + rowsPerPage);
-  }, [filteredDepartments, page, rowsPerPage]);
+      case "unitCode":
+        return (
+          <span className="font-mono text-xs font-bold text-blue-700">
+            {item.unitCode}
+          </span>
+        );
+
+      case "parentFormation":
+        return (
+          <span className="text-xs text-slate-600">
+            {item.parentFormation || "--"}
+          </span>
+        );
+
+      case "headquarters":
+        return (
+          <span className="text-xs text-slate-500">
+            {item.headquarters || "Lucknow"}
+          </span>
+        );
+
+      case "activeWritsCount":
+        return (
+          <Chip
+            size="sm"
+            variant="flat"
+            color="primary"
+            className="text-[10px] font-bold"
+          >
+            {item.activeWritsCount || 0} Writs
+          </Chip>
+        );
+
+      case "actions":
+        return (
+          <div className="flex items-center justify-center gap-1">
+            <Button
+              isIconOnly
+              size="sm"
+              variant="light"
+              className="text-slate-400 hover:text-slate-700"
+              onPress={() => handleOpenEdit(item)}
+              aria-label="Edit department"
+            >
+              <span className="material-symbols-rounded text-sm">edit</span>
+            </Button>
+
+            <Button
+              isIconOnly
+              size="sm"
+              variant="light"
+              className="text-slate-400 hover:text-rose-600"
+              onPress={() => handleOpenDelete(item)}
+              aria-label="Delete department"
+            >
+              <span className="material-symbols-rounded text-sm">delete</span>
+            </Button>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  const totalPages = Math.max(pagination?.pages || 1, 1);
+
+  // =====================================================
+  // UI
+  // =====================================================
 
   return (
     <div className="space-y-4">
       {/* 1. Header Information Bar */}
+
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <Link href="/admin/masters">
-                  <Button isIconOnly size="sm" variant="light" className="text-slate-500">
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="light"
+                    className="text-slate-500"
+                  >
                     <span className="material-symbols-rounded">arrow_back</span>
                   </Button>
                 </Link>
+
                 <h1 className="text-base font-bold text-slate-900">
                   7.2 Department & Institutional Units Master
                 </h1>
-                <Chip size="sm" className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700">
-                  {departments.length} Units Active
+
+                <Chip
+                  size="sm"
+                  className="bg-blue-500/20 px-1 text-[10px] font-bold text-blue-700"
+                >
+                  {totalCount} Units Active
                 </Chip>
               </div>
+
               <p className="text-xs text-slate-500 ml-9">
-                Institutional directorates, police wings, sections & internal administrative units
+                Institutional directorates, police wings, sections & internal
+                administrative units
               </p>
             </div>
+
             <Button
               size="sm"
               radius="sm"
               className="bg-[#0f2744] text-xs font-semibold text-white shadow hover:bg-[#163a66]"
-              startContent={<span className="material-symbols-rounded text-sm">add</span>}
+              startContent={
+                <span className="material-symbols-rounded text-sm">add</span>
+              }
               onPress={handleOpenAdd}
             >
               Add Department Unit
@@ -264,6 +472,7 @@ export default function OrganizationMasterPage() {
           </div>
 
           {/* Quick Filters */}
+
           <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
             <Input
               size="sm"
@@ -274,9 +483,14 @@ export default function OrganizationMasterPage() {
                 setSearchQuery(val);
                 setPage(1);
               }}
-              startContent={<span className="material-symbols-rounded text-sm text-slate-400">search</span>}
+              startContent={
+                <span className="material-symbols-rounded text-sm text-slate-400">
+                  search
+                </span>
+              }
               className="bg-slate-50 sm:col-span-2"
             />
+
             <Select
               size="sm"
               radius="sm"
@@ -290,13 +504,16 @@ export default function OrganizationMasterPage() {
               }}
               className="bg-slate-50 font-semibold"
             >
-              {(parent) => <SelectItem key={parent.key}>{parent.label}</SelectItem>}
+              {(parent) => (
+                <SelectItem key={parent.key}>{parent.label}</SelectItem>
+              )}
             </Select>
           </div>
         </CardBody>
       </Card>
 
-      {/* 2. Main Rules Table */}
+      {/* 2. Main Department Table */}
+
       <Card shadow="none" className="border border-slate-200/80 bg-white">
         <CardBody className="p-0">
           <Table
@@ -307,111 +524,79 @@ export default function OrganizationMasterPage() {
               totalPages > 1 ? (
                 <div className="flex w-full justify-between items-center p-3 border-t border-slate-100">
                   <span className="text-xs text-slate-500">
-                    Showing {(page - 1) * rowsPerPage + 1} to{" "}
-                    {Math.min(page * rowsPerPage, filteredDepartments.length)} of {filteredDepartments.length}
+                    Showing{" "}
+                    {totalCount === 0 ? 0 : (page - 1) * ROWS_PER_PAGE + 1} to{" "}
+                    {Math.min(page * ROWS_PER_PAGE, totalCount)} of {totalCount}
                   </span>
+
                   <Pagination
                     isCompact
                     showControls
                     color="primary"
                     page={page}
                     total={totalPages}
-                    onChange={(p) => setPage(p)}
+                    onChange={setPage}
                   />
                 </div>
               ) : null
             }
           >
-            <TableHeader>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                S.NO
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                DEPARTMENT / UNIT NAME
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                UNIT CODE
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                PARENT FORMATION
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                HEADQUARTERS
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                LINKED WRITS
-              </TableColumn>
-              <TableColumn className="bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center">
-                ACTION
-              </TableColumn>
+            <TableHeader columns={departmentColumns}>
+              {(column) => (
+                <TableColumn
+                  key={column.key}
+                  className={`bg-transparent text-[10px] font-bold uppercase tracking-wider text-slate-400 ${
+                    column.key === "actions" ? "text-center" : ""
+                  }`}
+                >
+                  {column.label}
+                </TableColumn>
+              )}
             </TableHeader>
+
             <TableBody
-              items={paginatedDepartments}
+              items={departments}
               emptyContent={
                 loading ? (
                   <div className="py-6 flex justify-center items-center gap-2 text-slate-500">
-                    <Spinner size="sm" /> Loading institutional units...
+                    <Spinner size="sm" />
+                    Loading institutional units...
                   </div>
                 ) : (
                   "No institutional units match your search."
                 )
               }
             >
-              {(item) => {
-                const itemIndex = (page - 1) * rowsPerPage + paginatedDepartments.indexOf(item) + 1;
-                return (
-                  <TableRow key={item._id} className="border-b border-slate-100 hover:bg-slate-50/70">
-                    <TableCell className="text-xs font-bold text-slate-400">{itemIndex}</TableCell>
-                    <TableCell className="text-xs font-bold text-slate-900">{item.unitName}</TableCell>
-                    <TableCell className="font-mono text-xs font-bold text-blue-700">
-                      {item.unitCode}
-                    </TableCell>
-                    <TableCell className="text-xs text-slate-600">{item.parentFormation}</TableCell>
-                    <TableCell className="text-xs text-slate-500">{item.headquarters || "Lucknow"}</TableCell>
+              {(item: IDepartmentItem) => (
+                <TableRow
+                  key={item._id}
+                  className="border-b border-slate-100 hover:bg-slate-50/70"
+                >
+                  {(columnKey) => (
                     <TableCell>
-                      <Chip size="sm" variant="flat" color="primary" className="text-[10px] font-bold">
-                        {item.activeWritsCount || 0} Writs
-                      </Chip>
+                      {renderDepartmentCell(item, columnKey)}
                     </TableCell>
-                    <TableCell className="text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <Button
-                          isIconOnly
-                          size="sm"
-                          variant="light"
-                          className="text-slate-400 hover:text-slate-700"
-                          onClick={() => handleOpenEdit(item)}
-                        >
-                          <span className="material-symbols-rounded text-sm">edit</span>
-                        </Button>
-                        <Button
-                          isIconOnly
-                          size="sm"
-                          variant="light"
-                          className="text-slate-400 hover:text-rose-600"
-                          onClick={() => handleOpenDelete(item)}
-                        >
-                          <span className="material-symbols-rounded text-sm">delete</span>
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              }}
+                  )}
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </CardBody>
       </Card>
 
       {/* MODAL 1: Add Department Modal */}
+
       <Modal isOpen={isAddOpen} onOpenChange={onAddOpenChange} placement="top">
         <ModalContent>
           {(onClose) => (
             <form onSubmit={handleAddSubmit(onAddDepartment)}>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span className="material-symbols-rounded text-blue-700">corporate_fare</span>
+                <span className="material-symbols-rounded text-blue-700">
+                  corporate_fare
+                </span>
                 Add Institutional Department Unit
               </ModalHeader>
+
               <ModalBody className="space-y-3">
                 <Controller
                   name="unitName"
@@ -419,8 +604,10 @@ export default function OrganizationMasterPage() {
                   render={({ field }) => (
                     <div>
                       <label className="text-xs font-semibold text-slate-700 block mb-1">
-                        Department / Unit Full Name <span className="text-red-500">*</span>
+                        Department / Unit Full Name{" "}
+                        <span className="text-red-500">*</span>
                       </label>
+
                       <Input
                         {...field}
                         size="sm"
@@ -440,6 +627,7 @@ export default function OrganizationMasterPage() {
                       <label className="text-xs font-semibold text-slate-700 block mb-1">
                         Unit Short Code <span className="text-red-500">*</span>
                       </label>
+
                       <Input
                         {...field}
                         size="sm"
@@ -459,15 +647,20 @@ export default function OrganizationMasterPage() {
                       <label className="text-xs font-semibold text-slate-700 block mb-1">
                         Parent Formation <span className="text-red-500">*</span>
                       </label>
+
                       <Select
                         size="sm"
                         items={PARENT_FORMATIONS}
-                        selectedKeys={[field.value]}
+                        selectedKeys={field.value ? [field.value] : []}
                         onChange={(e) => field.onChange(e.target.value)}
                         isInvalid={!!addErrors.parentFormation}
                         errorMessage={addErrors.parentFormation?.message}
                       >
-                        {(parent) => <SelectItem key={parent.key}>{parent.label}</SelectItem>}
+                        {(parent) => (
+                          <SelectItem key={parent.key}>
+                            {parent.label}
+                          </SelectItem>
+                        )}
                       </Select>
                     </div>
                   )}
@@ -481,6 +674,7 @@ export default function OrganizationMasterPage() {
                       <label className="text-xs font-semibold text-slate-700 block mb-1">
                         Headquarters
                       </label>
+
                       <Input
                         {...field}
                         size="sm"
@@ -492,10 +686,18 @@ export default function OrganizationMasterPage() {
                   )}
                 />
               </ModalBody>
+
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
+                <Button
+                  size="sm"
+                  variant="bordered"
+                  radius="sm"
+                  onPress={onClose}
+                  isDisabled={isSubmitting}
+                >
                   Cancel
                 </Button>
+
                 <Button
                   size="sm"
                   type="submit"
@@ -512,14 +714,22 @@ export default function OrganizationMasterPage() {
       </Modal>
 
       {/* MODAL 2: Edit Department Modal */}
-      <Modal isOpen={isEditOpen} onOpenChange={onEditOpenChange} placement="top">
+
+      <Modal
+        isOpen={isEditOpen}
+        onOpenChange={onEditOpenChange}
+        placement="top"
+      >
         <ModalContent>
           {(onClose) => (
             <form onSubmit={handleEditSubmit(onSaveEdit)}>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span className="material-symbols-rounded text-blue-700">edit</span>
+                <span className="material-symbols-rounded text-blue-700">
+                  edit
+                </span>
                 Edit Department: {editingDept?.unitCode}
               </ModalHeader>
+
               <ModalBody className="space-y-3">
                 <Controller
                   name="unitName"
@@ -529,6 +739,7 @@ export default function OrganizationMasterPage() {
                       <label className="text-xs font-semibold text-slate-700 block mb-1">
                         Department Name <span className="text-red-500">*</span>
                       </label>
+
                       <Input
                         {...field}
                         size="sm"
@@ -547,6 +758,7 @@ export default function OrganizationMasterPage() {
                       <label className="text-xs font-semibold text-slate-700 block mb-1">
                         Unit Code <span className="text-red-500">*</span>
                       </label>
+
                       <Input
                         {...field}
                         size="sm"
@@ -565,15 +777,20 @@ export default function OrganizationMasterPage() {
                       <label className="text-xs font-semibold text-slate-700 block mb-1">
                         Parent Formation <span className="text-red-500">*</span>
                       </label>
+
                       <Select
                         size="sm"
                         items={PARENT_FORMATIONS}
-                        selectedKeys={[field.value]}
+                        selectedKeys={field.value ? [field.value] : []}
                         onChange={(e) => field.onChange(e.target.value)}
                         isInvalid={!!editErrors.parentFormation}
                         errorMessage={editErrors.parentFormation?.message}
                       >
-                        {(parent) => <SelectItem key={parent.key}>{parent.label}</SelectItem>}
+                        {(parent) => (
+                          <SelectItem key={parent.key}>
+                            {parent.label}
+                          </SelectItem>
+                        )}
                       </Select>
                     </div>
                   )}
@@ -587,6 +804,7 @@ export default function OrganizationMasterPage() {
                       <label className="text-xs font-semibold text-slate-700 block mb-1">
                         Headquarters
                       </label>
+
                       <Input
                         {...field}
                         size="sm"
@@ -597,10 +815,18 @@ export default function OrganizationMasterPage() {
                   )}
                 />
               </ModalBody>
+
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
+                <Button
+                  size="sm"
+                  variant="bordered"
+                  radius="sm"
+                  onPress={onClose}
+                  isDisabled={isSubmitting}
+                >
                   Cancel
                 </Button>
+
                 <Button
                   size="sm"
                   type="submit"
@@ -617,31 +843,50 @@ export default function OrganizationMasterPage() {
       </Modal>
 
       {/* MODAL 3: Delete Confirmation Modal */}
-      <Modal isOpen={isDeleteOpen} onOpenChange={onDeleteOpenChange} placement="center" size="sm">
+
+      <Modal
+        isOpen={isDeleteOpen}
+        onOpenChange={onDeleteOpenChange}
+        placement="center"
+        size="sm"
+      >
         <ModalContent>
           {(onClose) => (
             <>
               <ModalHeader className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span className="material-symbols-rounded text-rose-600">warning</span>
+                <span className="material-symbols-rounded text-rose-600">
+                  warning
+                </span>
                 Confirm Deletion
               </ModalHeader>
+
               <ModalBody className="text-xs text-slate-600">
-                Are you sure you want to remove <b>{deptToDelete?.unitName}</b> ({deptToDelete?.unitCode})?
+                Are you sure you want to remove <b>{deptToDelete?.unitName}</b>{" "}
+                ({deptToDelete?.unitCode})?
                 {(deptToDelete?.activeWritsCount || 0) > 0 && (
                   <p className="mt-2 text-rose-600 font-semibold">
-                    Warning: There are {deptToDelete?.activeWritsCount} active writ petitions currently linked to this unit.
+                    Warning: There are {deptToDelete?.activeWritsCount} active
+                    writ petitions currently linked to this unit.
                   </p>
                 )}
               </ModalBody>
+
               <ModalFooter>
-                <Button size="sm" variant="bordered" radius="sm" onPress={onClose} isDisabled={isSubmitting}>
+                <Button
+                  size="sm"
+                  variant="bordered"
+                  radius="sm"
+                  onPress={onClose}
+                  isDisabled={isSubmitting}
+                >
                   Cancel
                 </Button>
+
                 <Button
                   size="sm"
                   radius="sm"
                   className="bg-rose-600 font-semibold text-white hover:bg-rose-700"
-                  onClick={handleConfirmDelete}
+                  onPress={handleConfirmDelete}
                   isLoading={isSubmitting}
                 >
                   Delete Unit

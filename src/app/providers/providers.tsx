@@ -1,6 +1,7 @@
+
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { Provider } from "react-redux";
 import { store } from "@/store";
 import { NextUIProvider } from "@nextui-org/react";
@@ -8,27 +9,47 @@ import { Toaster } from "react-hot-toast";
 import { useRouter } from "next/navigation";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { fetchMeThunk } from "@/store/slices/authSlice";
-import { fetchIntakeDropdowns } from "@/store/slices/mastersSlice";
 
-function AuthInitializer({ children }: { children: React.ReactNode }) {
+function AuthInitializer({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const dispatch = useAppDispatch();
-  const { isAuthenticated } = useAppSelector((state) => state.auth);
+
+  const { isAuthenticated } = useAppSelector(
+    (state) => state.auth
+  );
+
+  const authInitialized = useRef(false);
 
   useEffect(() => {
+    if (authInitialized.current) {
+      return;
+    }
+
+    authInitialized.current = true;
+
     dispatch(fetchMeThunk());
   }, [dispatch]);
 
   useEffect(() => {
     if (isAuthenticated) {
-      console.log("[LexWrit Masters] Pre-fetching master dropdown bundle...");
-      dispatch(fetchIntakeDropdowns());
+      console.log(
+        "[LexWrit Masters] Pre-fetching master dropdown bundle..."
+      );
+
     }
   }, [isAuthenticated, dispatch]);
 
   return <>{children}</>;
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const router = useRouter();
 
   return (
@@ -49,6 +70,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
               },
             }}
           />
+
           {children}
         </AuthInitializer>
       </NextUIProvider>
